@@ -1,0 +1,15 @@
+ultralytics>=8.3.0
+opencv-python>=4.8
+flask>=3.0
+requests>=2.31
+paho-mqtt>=2.0
+numpy>=1.24
+scipy>=1.10
+python-dotenv>=1.0
+
+# Audio AI (YAMNet). Optional but recommended - without it audio falls back to a plain loudness check.
+tensorflow>=2.15
+tensorflow-hub>=0.16
+
+# Only needed if you want to use a local microphone (e.g. next to a USB camera).
+sounddevice>=0.4.6

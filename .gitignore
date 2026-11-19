@@ -1,0 +1,5 @@
+.env
+cameras.json
+evidence/
+__pycache__/
+*.pt
