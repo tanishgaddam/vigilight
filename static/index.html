@@ -182,9 +182,19 @@ select{width:auto;flex:1}
   <div class="actions">
     <button class="btn" id="soundBtn" aria-pressed="false"><span id="soundIcon"></span><span id="soundLbl">Sound off</span></button>
     <button class="btn danger" id="testBtn">Test alert</button>
+    <button class="btn" id="demoBtn">▶ Demo</button>
+    <button class="btn" id="guardBtn">📱 Guard view</button>
     <button class="btn primary" id="addOpen"><span id="plusIcon"></span>Add camera</button>
   </div>
 </header>
+
+<!-- demo scenario bar (shown only when demo is active) -->
+<div id="demoBar" hidden style="background:rgba(34,211,238,.08);border-bottom:1px solid rgba(34,211,238,.35);padding:10px 22px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:13px;color:var(--accent)">
+  <span style="font-weight:700;letter-spacing:1px">DEMO MODE</span>
+  <span style="color:var(--muted)">Trigger a scenario:</span>
+  <span id="scenarioBtns" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+  <button class="btn small" id="demoStop" style="margin-left:auto;color:#fda4af;border-color:rgba(244,63,94,.5)">Stop demo</button>
+</div>
 
 <main class="layout">
   <section aria-label="Cameras">

@@ -4,15 +4,22 @@ Cameras can be added in the dashboard, or on the command line:
     python app.py --camera 0 --camera http://192.168.1.20:8080/video --camera rtsp://user:pw@host/stream
 """
 import argparse
+import hashlib
+import hmac
+import io
 import logging
+import secrets
+import socket
 import threading
+import time
 
 import numpy as np
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 
 import alerts as alerts_mod
 import config as cfg
 from alerts import AlertDispatcher
+from demo import SCENARIOS, create_demo_workers
 from sources import scan_usb
 from worker import CameraWorker
 
@@ -26,7 +33,8 @@ lock = threading.RLock()
 
 
 def persist():
-    cfg.save_camera_configs([{"name": w.name, "source": w.source, "audio": w.audio_cfg} for w in workers.values()])
+    cfg.save_camera_configs([{"name": w.name, "source": w.source, "audio": w.audio_cfg}
+                             for w in workers.values() if not w.is_demo])
 
 
 def add_camera(name, source, audio=None, save=True):
@@ -48,9 +56,85 @@ def add_camera(name, source, audio=None, save=True):
     return worker
 
 
+# --- optional access PIN (set ACCESS_PIN in .env; recommended whenever guards use phones on Wi-Fi) ---
+_SECRET = secrets.token_hex(16)
+
+
+def _auth_token():
+    return hashlib.sha256((cfg.ACCESS_PIN + _SECRET).encode()).hexdigest()
+
+
+@app.before_request
+def require_pin():
+    if not cfg.ACCESS_PIN or request.path in ("/login", "/api/login", "/static/login.html", "/static/manifest.json", "/static/icon.svg"):
+        return None
+    if hmac.compare_digest(request.cookies.get("vl_auth", ""), _auth_token()):
+        return None
+    if request.path.startswith(("/api/", "/video_feed", "/evidence", "/guard_qr")):
+        return jsonify({"error": "login required"}), 401
+    return redirect("/login?next=" + ("/guard" if request.path == "/guard" else "/"))
+
+
+@app.route("/login")
+def login_page():
+    return app.send_static_file("login.html")
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    pin = str((request.get_json(silent=True) or {}).get("pin", ""))
+    if not cfg.ACCESS_PIN or hmac.compare_digest(pin, cfg.ACCESS_PIN):
+        resp = jsonify({"ok": True})
+        if cfg.ACCESS_PIN:
+            resp.set_cookie("vl_auth", _auth_token(), httponly=True, samesite="Lax", max_age=60 * 60 * 24)
+        return resp
+    time.sleep(1.0)  # slows down PIN guessing
+    return jsonify({"error": "Wrong PIN"}), 401
+
+
+def lan_ip():
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))   # no packet is sent; this just picks the right network card
+            return sock.getsockname()[0]
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "127.0.0.1"
+
+
+def guard_url():
+    return f"http://{lan_ip()}:{cfg.PORT}/guard"
+
+
+def qr_available():
+    try:
+        import qrcode  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
+
+
+@app.route("/guard")
+def guard():
+    return app.send_static_file("guard.html")
+
+
+@app.route("/guard_qr.png")
+def guard_qr():
+    if not qr_available():
+        return "Install the qrcode package to show a QR code", 404
+    import qrcode
+
+    buf = io.BytesIO()
+    qrcode.make(guard_url(), box_size=8, border=2).save(buf, format="PNG")
+    return Response(buf.getvalue(), mimetype="image/png")
 
 
 @app.route("/video_feed/<name>")
@@ -120,9 +204,78 @@ def ack_alert(alert_id):
     return jsonify({"acked": dispatcher.ack(alert_id)})
 
 
+@app.route("/api/alerts/<int:alert_id>/action", methods=["POST"])
+def alert_action(alert_id):
+    data = request.get_json(silent=True) or {}
+    alert = dispatcher.act(alert_id, data.get("action", ""), data.get("name"))
+    if alert is None:
+        return jsonify({"error": "Unknown alert or action"}), 404
+    return jsonify(alert)
+
+
+@app.route("/api/stats")
+def stats():
+    return jsonify(dispatcher.stats())
+
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def settings():
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        try:
+            cfg.update_settings(data.get("sensitivity"), data.get("verify_first"))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    return jsonify(dict(cfg.SETTINGS, verify_timeout=cfg.VERIFY_TIMEOUT))
+
+
 @app.route("/api/system")
 def system():
-    return jsonify({"channels": dispatcher.channels(), "thresholds": {"warning": cfg.WARNING_THRESHOLD, "threat": cfg.THREAT_THRESHOLD}})
+    with lock:
+        demo = any(w.is_demo for w in workers.values())
+    return jsonify({"channels": dispatcher.channels(), "thresholds": {"warning": cfg.WARNING_THRESHOLD, "threat": cfg.THREAT_THRESHOLD},
+                    "settings": dict(cfg.SETTINGS, verify_timeout=cfg.VERIFY_TIMEOUT), "guard_url": guard_url(),
+                    "qr": qr_available(), "demo": demo, "pin": bool(cfg.ACCESS_PIN), "demo_notify": cfg.DEMO_NOTIFY})
+
+
+@app.route("/api/demo/scenarios")
+def demo_scenarios():
+    return jsonify([{"id": k, "label": v["label"], "seconds": v["duration"]} for k, v in SCENARIOS.items()])
+
+
+@app.route("/api/demo/start", methods=["POST"])
+def demo_start():
+    with lock:
+        if not any(w.is_demo for w in workers.values()):
+            for w in create_demo_workers(dispatcher):
+                workers[w.name] = w
+                w.start()
+        return jsonify([w.status() for w in workers.values() if w.is_demo])
+
+
+@app.route("/api/demo/stop", methods=["POST"])
+def demo_stop():
+    with lock:
+        for name in [n for n, w in workers.items() if w.is_demo]:
+            workers.pop(name).stop()
+    return jsonify({"demo": False})
+
+
+@app.route("/api/demo/trigger", methods=["POST"])
+def demo_trigger():
+    data = request.get_json(silent=True) or {}
+    with lock:
+        demos = [w for w in workers.values() if w.is_demo and hasattr(w, "scene")]
+        target = next((w for w in demos if w.name == data.get("camera")), demos[0] if demos else None)
+    if target is None:
+        return jsonify({"error": "Turn demo mode on first."}), 400
+    if data.get("scenario") == "crash" and not data.get("camera"):
+        target = next((w for w in demos if w.name == "demo_parking"), target)
+    try:
+        target.scene.trigger(data.get("scenario", ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"camera": target.name, "scenario": data["scenario"]})
 
 
 @app.route("/api/test_alert", methods=["POST"])

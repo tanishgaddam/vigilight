@@ -25,19 +25,21 @@ def _mask(source):
 
 
 class CameraWorker:
-    def __init__(self, name, source, audio, dispatcher):
+    def __init__(self, name, source, audio, dispatcher, video=None, detector=None, is_demo=False):
         self.name = name
         self.source = source
         self.audio_cfg = audio
         self.dispatcher = dispatcher
         self.running = True
-        self.video = VideoSource(source)
+        self.video = video if video is not None else VideoSource(source)
         self.threat = ThreatEngine()
         self.collision = CollisionEngine()
-        self.detector = None
-        self.loading = True
+        self.detector = detector            # injected for the demo; otherwise YOLO is loaded in _run
+        self.loading = detector is None
         self.error = None
 
+        self.is_demo = is_demo
+        self.top = {"id": None, "score": 0.0, "signals": []}
         self.level, self.score, self.people, self.fps = "NORMAL", 0.0, 0, 0.0
         self.latest_view = None
         self._cond = threading.Condition()
@@ -174,6 +176,8 @@ class CameraWorker:
         self.people = len(results)
         self.level = max((r["level"] for r in results), key=LEVEL_RANK.get, default="NORMAL")
         self.score = max((r["score"] for r in results), default=0.0)
+        best = max(results, key=lambda r: r["score"], default=None)
+        self.top = {"id": best["id"], "score": best["score"], "signals": best["signals"]} if best else {"id": None, "score": 0.0, "signals": []}
 
         view = self._draw(frame, results, det)
         self._publish(view)
@@ -198,7 +202,7 @@ class CameraWorker:
             color = LEVEL_COLORS[r["level"]]
             x1, y1, x2, y2 = map(int, r["box"])
             cv2.rectangle(img, (x1, y1), (x2, y2), color, th)
-            cv2.putText(img, f"#{r['id']} {r['level']} {r['score']:.2f}", (x1, max(18, y1 - 6)),
+            cv2.putText(img, f"#{r['id']} {cfg.risk_label(r['score'])} {r['score']:.2f}", (x1, max(18, y1 - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, scale, color, th)
             if r["kpts"] is not None:
                 for idx in (9, 10):
@@ -216,7 +220,7 @@ class CameraWorker:
         h, w = img.shape[:2]
         if w > cfg.STREAM_WIDTH:
             img = cv2.resize(img, (cfg.STREAM_WIDTH, int(h * cfg.STREAM_WIDTH / w)))
-        hud = f"{self.name} | CAM {self.video.fps:.0f} fps | AI {self.fps:.0f} fps | {self.level}"
+        hud = f"{self.name} | {cfg.crowd_label(self.people)} | {cfg.risk_label(self.score)} | {'DEMO' if self.is_demo else 'LIVE'}"
         cv2.putText(img, hud, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
         cv2.putText(img, hud, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, LEVEL_COLORS[self.level], 1)
         return img
@@ -226,7 +230,7 @@ class CameraWorker:
         if now - self._last_alert.get(alert["type"], 0) < cfg.ALERT_COOLDOWN:
             return
         self._last_alert[alert["type"]] = now
-        alert = dict(alert, camera=self.name)
+        alert = dict(alert, camera=self.name, demo=self.is_demo)
         alert["message"] = f"{alert['message']} at {self.name}"
         alert["snapshot"] = alerts_mod.save_snapshot(self.name, alert["type"], view)
         stored = self.dispatcher.publish(alert)
@@ -247,7 +251,11 @@ class CameraWorker:
     def status(self):
         audio = {"enabled": self.audio is not None, "backend": self.audio.backend if self.audio else None,
                  "error": self.audio.error if self.audio else None, "last": self._audio_text}
-        return {"name": self.name, "source": _mask(self.source), "kind": "usb" if isinstance(self.source, int) else "network",
+        return {"name": self.name, "source": _mask(self.source), "kind": "demo" if self.is_demo else ("usb" if isinstance(self.source, int) else "network"),
                 "online": self.video.online, "loading": self.loading, "fps": round(self.fps, 1), "cam_fps": round(self.video.fps, 1),
                 "level": self.level, "score": round(self.score, 2), "people": self.people,
+                "risk": cfg.risk_label(self.score) if self.video.online else "Offline",
+                "crowd": cfg.crowd_label(self.people),
+                "top": self.top, "demo": self.is_demo,
+                "scenario": self.scene.info() if getattr(self, "scene", None) else None,
                 "audio": audio, "error": self.error}

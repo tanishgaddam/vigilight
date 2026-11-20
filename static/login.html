@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VigiLight login</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#060910;color:#e6edf5;font-family:system-ui,sans-serif;padding:16px}
+.box{width:min(360px,100%);background:#0d1320;border:1px solid rgba(34,211,238,.35);border-radius:14px;padding:26px;display:grid;gap:14px}
+h1{margin:0;font-size:20px;letter-spacing:3px;color:#22d3ee}p{margin:0;color:#8b97ab;font-size:14px}
+input{font:inherit;font-size:22px;letter-spacing:6px;text-align:center;background:#0a101b;border:1px solid rgba(148,163,184,.25);border-radius:10px;padding:12px;color:inherit;width:100%}
+button{font:inherit;font-weight:700;background:#22d3ee;color:#04202a;border:0;border-radius:10px;padding:13px;cursor:pointer}
+.err{color:#fda4af;font-size:14px;min-height:18px}
+:focus-visible{outline:2px solid #22d3ee;outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>VIGILIGHT</h1><p>Enter the access PIN to continue.</p>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" aria-label="Access PIN" autofocus>
+  <div class="err" id="err" role="alert"></div>
+  <button id="go">Unlock</button>
+</div>
+<script>
+async function login() {
+  const err = document.getElementById('err'); err.textContent = '';
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: document.getElementById('pin').value }) });
+    if (r.ok) { const n = new URLSearchParams(location.search).get('next') || '/'; location.href = (n.startsWith('/') && !n.startsWith('//')) ? n : '/'; return; }
+    err.textContent = 'Wrong PIN. Try again.';
+  } catch (e) { err.textContent = 'Could not reach the server.'; }
+}
+document.getElementById('go').onclick = login;
+document.getElementById('pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+</script>
+</body>
+</html>
+

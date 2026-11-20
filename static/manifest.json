@@ -1,0 +1,10 @@
+{
+  "name": "VigiLight Guard",
+  "short_name": "VigiLight",
+  "start_url": "/guard",
+  "display": "standalone",
+  "background_color": "#060910",
+  "theme_color": "#060910",
+  "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
+

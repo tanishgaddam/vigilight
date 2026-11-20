@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#060910">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/static/manifest.json">
+<title>VigiLight Guard</title>
+<style>
+:root{--bg:#060910;--surface:#0d1320;--surface2:#131c2e;--line:rgba(148,163,184,.18);--accent:#22d3ee;--ok:#34d399;--warn:#fbbf24;--danger:#f43f5e;--text:#e6edf5;--muted:#8b97ab}
+*{box-sizing:border-box;margin:0;padding:0}[hidden]{display:none!important}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:17px;line-height:1.35;padding-bottom:calc(76px + env(safe-area-inset-bottom));-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+header{position:sticky;top:0;z-index:20;background:rgba(6,9,16,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px}
+.brand{font-weight:800;letter-spacing:3px;color:var(--accent);font-size:16px;margin-right:auto}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok)}.dot.off{background:var(--danger)}
+.chipbtn{background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:14px}
+.status{margin:14px;border-radius:14px;padding:16px;font-size:20px;font-weight:700;text-align:center;border:1px solid var(--line);background:var(--surface)}
+.status.ok{color:var(--ok);border-color:rgba(52,211,153,.4)}.status.bad{color:#fff;background:#7f1230;border-color:var(--danger)}
+.banner{margin:0 14px 14px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.5);color:var(--warn);border-radius:12px;padding:12px;font-size:15px;display:grid;gap:8px}
+.banner button{background:var(--warn);color:#201500;border:0;border-radius:10px;padding:10px;font-weight:700}
+
+/* demo banner */
+.demo-banner{margin:0 14px 14px;background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.35);color:var(--accent);border-radius:12px;padding:10px 14px;font-size:14px;display:flex;align-items:center;gap:8px}
+.demo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+main{padding:0 14px;display:grid;gap:14px}
+h2{font-size:13px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin:6px 0 -4px;font-weight:700}
+.card{background:var(--surface);border:1px solid var(--line);border-left:6px solid var(--warn);border-radius:14px;overflow:hidden}
+.card.CRITICAL{border-left-color:var(--danger)}.card.closed{opacity:.6}
+.card img.snap{width:100%;display:block;background:#000;max-height:260px;object-fit:cover}
+.card .body{padding:14px;display:grid;gap:10px}
+.title{font-size:21px;font-weight:800}.meta{color:var(--muted);font-size:14.5px}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:13px;border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--muted)}
+.tag.demo{color:var(--accent);border-color:rgba(34,211,238,.5);background:rgba(34,211,238,.07)}
+.tag.st-pending{color:var(--warn);border-color:rgba(251,191,36,.6)}.tag.st-confirmed{color:#fda4af;border-color:rgba(244,63,94,.6)}
+.tag.st-responding{color:var(--accent);border-color:rgba(34,211,238,.6)}.tag.st-resolved{color:var(--ok);border-color:rgba(52,211,153,.6)}
+.btns{display:grid;gap:10px}.btns.row{grid-template-columns:1fr 1fr}
+.btn{min-height:56px;border-radius:12px;border:1px solid var(--line);background:var(--surface2);font-weight:700;font-size:17px;padding:10px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#04202a;grid-column:1/-1}
+.btn.bad{border-color:rgba(244,63,94,.6);color:#fda4af}
+.btn.ghost{min-height:44px;font-weight:600;font-size:15px;color:var(--muted)}
+
+/* WHY panel */
+.why{background:#0a101b;border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:9px}
+.why h3{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent)}
+.why-row{display:grid;grid-template-columns:1.5fr 1fr 64px;gap:8px;align-items:center;font-size:14.5px}
+.why-bar{height:8px;background:#1b2233;border-radius:4px;overflow:hidden}.why-bar i{display:block;height:100%;background:var(--accent)}
+.why-word{font-size:12px;color:var(--muted);text-align:right}.why-note{font-size:14px;color:var(--muted)}
+
+/* sensitivity chip */
+.sens{font-size:13px;border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--muted)}
+.sens.low{color:#94a3b8}.sens.medium{color:var(--warn)}.sens.high{color:var(--danger)}
+
+.cam{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;width:100%;text-align:left}
+.cam strong{flex:1}.pillst{font-size:13px;border:1px solid currentColor;border-radius:99px;padding:2px 10px}
+.c-normal{color:var(--ok)}.c-warn{color:var(--warn)}.c-danger{color:var(--danger)}.c-off{color:var(--muted)}
+.live{width:100%;border-radius:12px;background:#000;display:block;margin-top:8px}
+.empty{color:var(--muted);text-align:center;padding:26px 8px;font-size:15px}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:rgba(6,9,16,.96);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(3,1fr);padding-bottom:env(safe-area-inset-bottom)}
+nav button{background:none;border:0;padding:14px 4px;font-size:15px;color:var(--muted);font-weight:600;position:relative}
+nav button[aria-selected=true]{color:var(--accent)}
+nav .count{position:absolute;top:6px;margin-left:4px;background:var(--danger);color:#fff;border-radius:99px;font-size:12px;padding:0 6px}
+.takeover{position:fixed;inset:0;z-index:50;overflow:auto;padding:14px;background:#4a0716;animation:flash 1s infinite}
+@keyframes flash{50%{background:#7a0e24}}
+.takeover .kicker{text-align:center;font-weight:800;letter-spacing:3px;margin:6px 0 12px;color:#ffd1d9}
+@media(prefers-reduced-motion:reduce){.takeover{animation:none}}
+.toast{position:fixed;left:14px;right:14px;bottom:calc(88px + env(safe-area-inset-bottom));z-index:60;background:var(--surface2);border:1px solid var(--accent);border-radius:12px;padding:12px 14px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">VIGILIGHT GUARD</div>
+  <button class="chipbtn" id="nameBtn" aria-label="Change your name">Set name</button>
+  <span class="dot" id="dot" title="Connection"></span>
+</header>
+
+<div class="status ok" id="status" role="status" aria-live="polite">Connecting...</div>
+<div class="banner" id="soundBanner">
+  <span>Tap once to turn on alert sound, vibration and keep this screen awake.</span>
+  <button id="soundBtn">Turn on alerts</button>
+</div>
+<div class="demo-banner" id="demoBanner" hidden>
+  <span class="demo-dot"></span>
+  <span>Demo mode — simulated cameras only. Alerts here are for testing.</span>
+</div>
+
+<main>
+  <section id="tabAlerts"><div id="open" style="display:grid;gap:14px"></div></section>
+  <section id="tabCams" hidden><div id="cams" style="display:grid;gap:10px"></div></section>
+  <section id="tabHistory" hidden><div id="history" style="display:grid;gap:14px"></div></section>
+</main>
+
+<nav role="tablist">
+  <button role="tab" id="navAlerts" aria-selected="true">Alerts<span class="count" id="openCount" hidden></span></button>
+  <button role="tab" id="navCams" aria-selected="false">Cameras</button>
+  <button role="tab" id="navHistory" aria-selected="false">History</button>
+</nav>
+<div class="takeover" id="takeover" hidden role="alertdialog" aria-live="assertive"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* blocked */ } } };
+
+const TITLES = { ARMED_ATTACK_RISK: 'Armed person acting aggressively', VIOLENCE_DETECTED: 'Possible fight', ROAD_ACCIDENT: 'Possible car crash',
+  GLASS_BREAK: 'Glass breaking', DISTRESS_SCREAM: 'Screaming heard', GUNSHOT_AUDIO: 'Loud bang, possible gunshot', LOUD_NOISE: 'Very loud noise', TEST_ALERT: 'Test alert' };
+const STATUS = { closed: 'Closed', new: 'New', pending: 'Needs a guard', confirmed: 'Confirmed real', responding: 'On the way', resolved: 'Resolved', dismissed: 'False alarm' };
+const title = (t) => TITLES[t] || t.replace(/_/g, ' ').toLowerCase();
+
+// Plain-language signal strength
+function strength(v, max) { const r = max ? v / max : 0; return r >= 0.66 ? 'Strong' : r >= 0.33 ? 'Medium' : r > 0.05 ? 'Weak' : 'Not seen'; }
+function ago(ts) { const s = Math.max(0, Math.round(Date.now() / 1000 - ts)); return s < 10 ? 'just now' : s < 60 ? s + ' s ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; }
+function toast(msg) { const t = el('div', 'toast', msg); document.body.appendChild(t); setTimeout(() => t.remove(), 3000); }
+
+/* ---------- name, sound, wake lock ---------- */
+function getName(force) {
+  let n = store.get('vl_name', '');
+  if (!n || force) { n = (prompt('Your name (shown when you respond):', n) || '').trim(); if (n) store.set('vl_name', n); }
+  $('#nameBtn').textContent = n ? 'You: ' + n : 'Set name';
+  return n || 'Guard';
+}
+$('#nameBtn').onclick = () => getName(true); getName(false);
+let soundOn = false, ctx = null, wake = null;
+$('#soundBtn').onclick = async () => {
+  soundOn = true; ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume();
+  try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* not allowed */ }
+  $('#soundBanner').hidden = true; beep(1); toast('Alerts on. Keep this page open.');
+};
+function beep(n) {
+  if (!soundOn || !ctx) return;
+  for (let i = 0; i < n * 2; i++) { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'square'; o.frequency.value = i % 2 ? 900 : 650; g.gain.value = 0.15; o.connect(g); g.connect(ctx.destination); const t = ctx.currentTime + i * 0.28; o.start(t); o.stop(t + 0.25); }
+}
+document.addEventListener('visibilitychange', async () => { if (soundOn && document.visibilityState === 'visible' && navigator.wakeLock) { try { wake = await navigator.wakeLock.request('screen'); } catch (e) { /* ignore */ } } });
+
+/* ---------- Why did this trigger? panel ---------- */
+function buildWhy(a) {
+  const box = el('div', 'why'); box.appendChild(el('h3', '', 'Why did this trigger?'));
+
+  // Sort signals by their fill ratio descending
+  (a.signals || []).slice().sort((x, y) => (y.value / y.max) - (x.value / x.max)).forEach((s) => {
+    const row = el('div', 'why-row');
+    const bar = el('span', 'why-bar'); const fill = el('i');
+    fill.style.width = Math.round(Math.min(1, s.max ? s.value / s.max : 0) * 100) + '%';
+    bar.appendChild(fill);
+    // Plain language strength instead of raw number
+    row.append(el('span', '', s.name), bar, el('span', 'why-word', strength(s.value, s.max)));
+    box.appendChild(row);
+  });
+
+  // Explain what made it fire
+  let note = '';
+  if (a.type === 'ARMED_ATTACK_RISK') note = 'Holding a weapon is not enough. The AI also needs aggressive behaviour toward someone, and it has to last about ' + (a.sustain || 1).toFixed(1) + ' seconds.';
+  else if (a.threshold != null && a.sustain) note = 'The AI alerts when these signals add up to the danger level and stay there for about ' + a.sustain.toFixed(1) + ' seconds.';
+  else if (a.type === 'ROAD_ACCIDENT') note = 'Two vehicles touched while moving, then both stopped.';
+  else note = 'The audio AI recognised this sound. Confidence: ' + (a.confidence || 'Possible').toLowerCase() + '.';
+  box.appendChild(el('div', 'why-note', note));
+  return box;
+}
+
+/* ---------- alert cards ---------- */
+async function act(id, action) {
+  const name = action === 'respond' ? getName(false) : undefined;
+  try { await fetch('/api/alerts/' + id + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, name }) }); }
+  catch (e) { return toast('No connection. Try again.'); }
+  $('#takeover').hidden = true; poll();
+  toast({ confirm: 'Marked as real', dismiss: 'Marked as false alarm', respond: "On my way — you're marked as responding", resolve: 'Marked as resolved' }[action] || 'Done');
+}
+
+function buildCard(a, big) {
+  const closed = !isOpen(a);
+  const card = el('article', 'card ' + a.severity + (closed ? ' closed' : ''));
+
+  if (a.snapshot) { const im = el('img', 'snap'); im.src = '/evidence/' + encodeURIComponent(a.snapshot); im.alt = 'Snapshot of the incident'; card.appendChild(im); }
+
+  const body = el('div', 'body'); card.appendChild(body);
+  body.appendChild(el('div', 'title', title(a.type)));
+  body.appendChild(el('div', 'meta', a.camera.replace(/_/g, ' ') + ' · ' + ago(a.ts) + ' · ' + (a.confidence || 'Possible')));
+
+  const tags = el('div', 'tags');
+  tags.appendChild(el('span', 'tag st-' + a.status, STATUS[a.status] || a.status));
+  if (a.responder) tags.appendChild(el('span', 'tag', a.responder + (a.responded_in != null ? ' — replied in ' + Math.round(a.responded_in) + ' s' : '')));
+  if (a.demo) tags.appendChild(el('span', 'tag demo', 'DEMO'));
+  body.appendChild(tags);
+
+  // Action buttons — only for open, non-WARNING alerts
+  if (a.severity !== 'WARNING' && !closed) {
+    const btns = el('div', 'btns row');
+    const add = (label, action, cls) => { const b = el('button', 'btn ' + (cls || ''), label); b.onclick = () => act(a.id, action); btns.appendChild(b); };
+    if (a.status === 'responding') {
+      add('Mark resolved', 'resolve', 'primary');
+    } else {
+      add('On my way', 'respond', 'primary');   // full-width primary CTA
+      if (a.status !== 'confirmed') add('Verify — real', 'confirm');
+      add('Dismiss — false alarm', 'dismiss', 'bad');
+    }
+    body.appendChild(btns);
+  }
+
+  // WHY panel (collapsible)
+  const whyBox = el('div'); whyBox.hidden = !big; whyBox.appendChild(buildWhy(a));
+  const toggle = el('button', 'btn ghost', big ? 'Hide details' : 'Why did this trigger?');
+  toggle.onclick = () => { whyBox.hidden = !whyBox.hidden; toggle.textContent = whyBox.hidden ? 'Why did this trigger?' : 'Hide details'; };
+  body.append(toggle, whyBox);
+  return card;
+}
+
+/* ---------- polling + rendering ---------- */
+let alerts = [], cams = [], sys = null, lastSeen = 0, first = true, sig = '', camSig = '', tab = 'alerts', openLive = null;
+const isOpen = (a) => a.severity !== 'WARNING' && !['dismissed', 'resolved', 'closed'].includes(a.status);
+
+function render() {
+  const open = alerts.filter(isOpen); const closed = alerts.filter((a) => !isOpen(a));
+  const s = $('#status');
+  s.className = 'status ' + (open.length ? 'bad' : 'ok');
+  s.textContent = open.length ? (open.length === 1 ? '1 alert needs you' : open.length + ' alerts need you') : 'All clear';
+  const oc = $('#openCount'); oc.hidden = !open.length; oc.textContent = open.length;
+  document.title = (open.length ? '(' + open.length + ') ' : '') + 'VigiLight Guard';
+  const nsig = alerts.map((a) => a.id + a.status).join('|') + tab;
+  if (nsig === sig) return; sig = nsig;
+  const o = $('#open'); o.textContent = '';
+  if (!open.length) o.appendChild(el('div', 'empty', 'Nothing to do right now. This page tells you the moment something happens.'));
+  open.forEach((a) => o.appendChild(buildCard(a, false)));
+  const h = $('#history'); h.textContent = '';
+  if (!closed.length) h.appendChild(el('div', 'empty', 'No earlier incidents.'));
+  closed.slice(0, 30).forEach((a) => h.appendChild(buildCard(a, false)));
+}
+
+function renderCams() {
+  // Show demo banner if any demo camera is active
+  const hasDemo = cams.some((c) => c.demo);
+  $('#demoBanner').hidden = !hasDemo;
+
+  const nsig = cams.map((c) => c.name + c.level + c.online + c.crowd).join('|') + openLive;
+  if (nsig === camSig) return; camSig = nsig;
+  const box = $('#cams'); box.textContent = '';
+  if (!cams.length) box.appendChild(el('div', 'empty', 'No cameras connected.'));
+  cams.forEach((c) => {
+    const wrap = el('div'); const b = el('button', 'cam');
+    const state = c.loading ? ['Starting', 'c-off'] : !c.online ? ['Offline', 'c-off']
+      : c.level === 'THREAT' ? ['Danger', 'c-danger']
+      : c.level === 'WARNING' ? ['Tense', 'c-warn']
+      : [c.risk || c.level, 'c-normal'];
+    // Show plain-language crowd label instead of raw person count
+    b.append(el('strong', '', c.name.replace(/_/g, ' ')), el('span', 'meta', c.crowd || ('People: ' + c.people)), el('span', 'pillst ' + state[1], state[0]));
+    b.onclick = () => { openLive = openLive === c.name ? null : c.name; camSig = ''; renderCams(); };
+    wrap.appendChild(b);
+    if (openLive === c.name) { const im = el('img', 'live'); im.src = '/video_feed/' + encodeURIComponent(c.name); im.alt = 'Live view of ' + c.name; wrap.appendChild(im); }
+    box.appendChild(wrap);
+  });
+}
+
+function takeOver(a) {
+  const t = $('#takeover'); t.textContent = ''; t.appendChild(el('div', 'kicker', a.demo ? 'DEMO ALERT' : 'NEW ALERT')); t.appendChild(buildCard(a, true)); t.hidden = false;
+  if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]); beep(3);
+}
+
+async function poll() {
+  try {
+    [alerts, cams] = await Promise.all([
+      fetch('/api/alerts').then((r) => r.json()),
+      fetch('/api/cameras').then((r) => r.json()),
+    ]);
+    // Also refresh system info for sensitivity label
+    fetch('/api/system').then((r) => r.json()).then((s) => { sys = s; }).catch(() => {});
+    $('#dot').classList.remove('off');
+    const maxId = alerts.reduce((m, a) => Math.max(m, a.id), 0);
+    if (first) { lastSeen = maxId; first = false; }
+    else alerts.filter((a) => a.id > lastSeen).sort((x, y) => x.id - y.id).forEach((a) => { if (a.severity !== 'WARNING') takeOver(a); });
+    lastSeen = Math.max(lastSeen, maxId);
+    if (!$('#takeover').hidden) { const cur = alerts.find((a) => a.id === lastSeen); if (cur && !isOpen(cur)) $('#takeover').hidden = true; }
+    render(); renderCams();
+  } catch (e) { $('#dot').classList.add('off'); }
+}
+
+function setTab(t) {
+  tab = t; sig = '';
+  for (const [k, id, sec] of [['alerts', 'navAlerts', 'tabAlerts'], ['cams', 'navCams', 'tabCams'], ['history', 'navHistory', 'tabHistory']]) {
+    $('#' + id).setAttribute('aria-selected', k === t); $('#' + sec).hidden = k !== t;
+  }
+  render();
+}
+$('#navAlerts').onclick = () => setTab('alerts');
+$('#navCams').onclick = () => setTab('cams');
+$('#navHistory').onclick = () => setTab('history');
+poll(); setInterval(poll, 1500);
+</script>
+</body>
+</html>
+

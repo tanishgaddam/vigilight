@@ -156,3 +156,90 @@ def derive_audio_source(source, audio):
             return source[: -len("/video")] + "/audio.wav"
         return None
     return str(audio)
+
+
+# --- verification workflow, demo, access ----------------------------------
+VERIFY_FIRST = _bool("VERIFY_FIRST", False)              # hold external alerts until a guard confirms
+VERIFY_TIMEOUT = _float("VERIFY_TIMEOUT", 45)            # ...or send them anyway after this many seconds
+DEMO_NOTIFY = _bool("DEMO_NOTIFY", False)                # demo alerts stay on the dashboard unless this is true
+ACCESS_PIN = _str("ACCESS_PIN")                          # optional shared PIN for the dashboard and guard view
+CROWD_BUSY = _int("CROWD_BUSY", 4)                       # people in view that count as busy / crowded / packed
+CROWD_CROWDED = _int("CROWD_CROWDED", 8)
+CROWD_PACKED = _int("CROWD_PACKED", 15)
+
+# --- sensitivity presets (Low / Medium / High) ----------------------------
+SENSITIVITY_PRESETS = {
+    "low":    dict(THREAT_THRESHOLD=0.72, WARNING_THRESHOLD=0.45, SUSTAIN_ARMED=1.2, SUSTAIN_UNARMED=2.5, STRIKE_SPEED=3.2),
+    "medium": dict(THREAT_THRESHOLD=THREAT_THRESHOLD, WARNING_THRESHOLD=WARNING_THRESHOLD,
+                   SUSTAIN_ARMED=SUSTAIN_ARMED, SUSTAIN_UNARMED=SUSTAIN_UNARMED, STRIKE_SPEED=STRIKE_SPEED),
+    "high":   dict(THREAT_THRESHOLD=0.50, WARNING_THRESHOLD=0.28, SUSTAIN_ARMED=0.6, SUSTAIN_UNARMED=1.0, STRIKE_SPEED=2.0),
+}
+SETTINGS_FILE = BASE_DIR / "settings.json"
+SETTINGS = {"sensitivity": "medium", "verify_first": VERIFY_FIRST}
+
+
+def apply_sensitivity(level):
+    """Live-update the behaviour thresholds (the engine reads them on every frame)."""
+    preset = SENSITIVITY_PRESETS[level]
+    globals().update(preset)
+    SETTINGS["sensitivity"] = level
+
+
+def update_settings(sensitivity=None, verify_first=None):
+    if sensitivity is not None:
+        if sensitivity not in SENSITIVITY_PRESETS:
+            raise ValueError("sensitivity must be low, medium or high")
+        apply_sensitivity(sensitivity)
+    if verify_first is not None:
+        SETTINGS["verify_first"] = bool(verify_first)
+    with _file_lock:
+        try:
+            SETTINGS_FILE.write_text(json.dumps(SETTINGS, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+    return dict(SETTINGS)
+
+
+def _load_settings():
+    try:
+        saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if saved.get("sensitivity") in SENSITIVITY_PRESETS:
+        apply_sensitivity(saved["sensitivity"])
+    if "verify_first" in saved:
+        SETTINGS["verify_first"] = bool(saved["verify_first"])
+
+
+_load_settings()
+
+
+# --- plain-language labels ------------------------------------------------
+def risk_label(score):
+    if score >= THREAT_THRESHOLD:
+        return "Danger"
+    if score >= WARNING_THRESHOLD:
+        return "Tense"
+    if score >= 0.12:
+        return "Some activity"
+    return "Calm"
+
+
+def crowd_label(count):
+    if count <= 0:
+        return "Empty"
+    if count < CROWD_BUSY:
+        return "Quiet"
+    if count < CROWD_CROWDED:
+        return "Busy"
+    if count < CROWD_PACKED:
+        return "Crowded"
+    return "Packed"
+
+
+def confidence_label(score):
+    if score >= 0.80:
+        return "Very likely"
+    if score >= 0.60:
+        return "Likely"
+    return "Possible"

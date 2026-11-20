@@ -243,7 +243,8 @@ class ThreatEngine:
                                        "message": msg, "score": round(st.score, 2), "reasons": reasons, "person_id": pid})
 
             results.append({"id": pid, "box": me["p"]["box"], "kpts": me["p"]["kpts"], "level": st.level,
-                            "score": st.score, "armed": armed > 0, "weapon": st.weapon_label if armed > 0 else None})
+                "score": st.score, "armed": armed > 0, "weapon": st.weapon_label if armed > 0 else None,
+                "signals": reasons})
 
         for pid in [k for k, s in self.states.items() if now - s.last_seen > 3.0]:
             del self.states[pid]
