@@ -14,6 +14,9 @@ class VideoSource:
         self.frame = None
         self.frame_id = 0
         self.online = False
+        self.fps = 0.0
+        self._fps_t = time.time()
+        self._fps_n = 0
         self.running = False
         self._lock = threading.Lock()
         self._cap = None
@@ -35,6 +38,13 @@ class VideoSource:
             self.frame = frame
             if frame is not None:
                 self.frame_id += 1
+                self._fps_n += 1
+                now = time.time()
+                if now - self._fps_t >= 1.0:
+                    self.fps = self._fps_n / (now - self._fps_t)
+                    self._fps_t, self._fps_n = now, 0
+            else:
+                self.fps, self._fps_n, self._fps_t = 0.0, 0, time.time()
             self.online = frame is not None
 
     def _open(self):

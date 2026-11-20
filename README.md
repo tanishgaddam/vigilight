@@ -29,6 +29,15 @@ Dashboard (full-screen flashing overlay, siren, spoken warning, acknowledge butt
 (snapshot + clip), Discord webhook, ntfy phone push, MQTT. Every alert stores a snapshot and a
 7-second clip (4 s before, 3 s after) in `evidence/`.
 
+## Dashboard
+
+- **Header stats:** cameras online, active threats and open alerts at a glance; the browser tab title also shows `[ALERT]` or the open count.
+- **Camera cards:** colour-coded level chip, threat meter with the warning/alert thresholds marked, people count, camera and AI fps, audio status. Hover a card for focus view, fullscreen and remove. Layout switch: Auto / 1 / 2 / 3 columns.
+- **Incident log:** filter by Open / Critical / High and by camera, click a snapshot for the incident detail (clip player, reasons, confidence), **Acknowledge all**.
+- **Alarm overlay:** flashing full-screen alert with snapshot, siren, spoken warning; **Sound** must be enabled once per page load (browser rule).
+- **Add camera:** USB / IP / RTSP / video-file tiles with hints and **Scan USB**.
+- Shows a banner when the server connection drops; keyboard friendly (Esc closes dialogs).
+
 ## Run it
 
 ```bash
@@ -36,6 +45,8 @@ pip install -r requirements.txt
 cp .env.example .env        # add the alert channels you want
 python app.py               # then open http://localhost:5000
 ```
+
+The feed shows `CAM n fps` (what the camera delivers) and `AI n fps` (how often detection runs) in the top-left corner.
 
 Add cameras in the dashboard (USB / IP / RTSP / video file, **Scan USB** finds webcams), or:
 
@@ -47,6 +58,25 @@ python app.py --camera 0 --camera 192.168.1.20:8080 --camera rtsp://user:pw@192.
 - **USB webcam:** pick *Local microphone* for audio if you want sound analysis.
 - **Test your setup:** the **Send test alert** button fires a fake CRITICAL alert through every configured channel.
 - The first start downloads YOLO and YAMNet weights; the feed appears after a few seconds.
+
+## Train the knife and gun model
+
+COCO's knife class is weak and it has no gun class, so train a small detector on your own data.
+
+1. **Get a dataset in YOLO format** with at least `gun` and `knife` classes. Roboflow Universe has public
+   weapon-detection datasets: search "gun knife detection" and export as *YOLOv11* (it gives you a folder with `data.yaml`).
+   Open Images also has Handgun and Knife classes. Check each dataset's licence, and make sure it includes
+   realistic CCTV-style, small and partly hidden examples, not only close-up stock photos.
+2. **Train** (free Colab GPU: Runtime -> Change runtime type -> GPU, upload the project, `pip install ultralytics`):
+   ```bash
+   python train_weapons.py --data path/to/data.yaml
+   ```
+   It trains YOLO11s at 960 px, prints precision / recall / mAP, and copies the best weights to `weights/weapons.pt`.
+3. **Restart VigiLight.** It loads `weights/weapons.pt` automatically (or set `WEAPON_MODEL=` in `.env`).
+   Every class in that model counts as a weapon, and COCO knife/scissors/bat are switched off unless `WEAPON_KEEP_COCO=true`.
+
+Put the mAP / precision / recall numbers in your report. Use `yolo11n.pt` as `--base` if the speed is too low on your PC.
+The weapon model adds a third network per frame, so lower `PROCESS_FPS` or `WEAPON_IMGSZ` if the AI fps drops.
 
 ## Evaluate (for your results table)
 

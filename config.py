@@ -48,7 +48,11 @@ PORT = _int("VIGILIGHT_PORT", 5000)
 # --- models ---------------------------------------------------------------
 OBJECT_MODEL = _str("OBJECT_MODEL", "yolo11n.pt")        # vehicles + COCO weapons
 POSE_MODEL = _str("POSE_MODEL", "yolo11n-pose.pt")       # people + body keypoints
-WEAPON_MODEL = _str("WEAPON_MODEL", "")                  # optional fine-tuned weapon model
+WEAPON_MODEL = _str("WEAPON_MODEL", "")                  # fine-tuned knife/gun model
+if not WEAPON_MODEL and (BASE_DIR / "weights" / "weapons.pt").exists():
+    WEAPON_MODEL = str(BASE_DIR / "weights" / "weapons.pt")   # train_weapons.py writes it here
+WEAPON_IMGSZ = _int("WEAPON_IMGSZ", 960)                 # guns/knives are small: larger input helps
+WEAPON_KEEP_COCO = _bool("WEAPON_KEEP_COCO", False)      # also use COCO knife/scissors/bat next to the custom model
 DEVICE = _str("DEVICE", "")
 IMG_SIZE = _int("IMG_SIZE", 640)
 PROCESS_FPS = _float("PROCESS_FPS", 8)

@@ -216,9 +216,9 @@ class CameraWorker:
         h, w = img.shape[:2]
         if w > cfg.STREAM_WIDTH:
             img = cv2.resize(img, (cfg.STREAM_WIDTH, int(h * cfg.STREAM_WIDTH / w)))
-        hud = f"{self.name} | {self.level} | {self.fps:.0f} fps"
-        cv2.putText(img, hud, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4)
-        cv2.putText(img, hud, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, LEVEL_COLORS[self.level], 1)
+        hud = f"{self.name} | CAM {self.video.fps:.0f} fps | AI {self.fps:.0f} fps | {self.level}"
+        cv2.putText(img, hud, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
+        cv2.putText(img, hud, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, LEVEL_COLORS[self.level], 1)
         return img
 
     # --- alerts + evidence ----------------------------------------------------------
@@ -248,6 +248,6 @@ class CameraWorker:
         audio = {"enabled": self.audio is not None, "backend": self.audio.backend if self.audio else None,
                  "error": self.audio.error if self.audio else None, "last": self._audio_text}
         return {"name": self.name, "source": _mask(self.source), "kind": "usb" if isinstance(self.source, int) else "network",
-                "online": self.video.online, "loading": self.loading, "fps": round(self.fps, 1),
+                "online": self.video.online, "loading": self.loading, "fps": round(self.fps, 1), "cam_fps": round(self.video.fps, 1),
                 "level": self.level, "score": round(self.score, 2), "people": self.people,
                 "audio": audio, "error": self.error}
