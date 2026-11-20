@@ -23,8 +23,8 @@ import config as cfg
 L_SHOULDER, R_SHOULDER, L_WRIST, R_WRIST = 5, 6, 9, 10  # COCO keypoint indexes
 KP_CONF = 0.35
 JITTER = 0.015          # ignore keypoint wobble smaller than this (body heights)
-STRIKE_WINDOW = 0.5     # seconds
-APPROACH_WINDOW = 0.8   # seconds
+STRIKE_WINDOW = 1.0     # seconds (expanded to handle low FPS / multi-camera CPU load)
+APPROACH_WINDOW = 1.5   # seconds (expanded to handle low FPS / multi-camera CPU load)
 ARMED_HOLD_SEC = 1.2    # keep "armed" status through brief weapon-detection dropouts
 LEVEL_RANK = {"NORMAL": 0, "WATCH": 1, "WARNING": 2, "THREAT": 3}
 AUDIO_NAMES = {
@@ -91,6 +91,9 @@ class PersonState:
         self.score = 0.0
         self.level = "NORMAL"
         self.above_since = None
+        self.peak = 0.0
+        self.peak_signals = []
+        self.peak_reasons = []
         self.cooldown_until = 0.0
         self.last_seen = 0.0
         self.armed_until = 0.0
@@ -101,10 +104,10 @@ class PersonState:
 def _strike(st, now):
     """0..1 measure of fast arm movement relative to the body (walking is subtracted)."""
     pts = [(t, rel) for t, rel in st.hist if now - t <= STRIKE_WINDOW]
-    if len(pts) < 3:
+    if len(pts) < 2:
         return 0.0
     dt = pts[-1][0] - pts[0][0]
-    if dt < 0.2:
+    if dt < 0.05:
         return 0.0
     best = 0.0
     for k in range(2):
@@ -126,10 +129,10 @@ def _strike(st, now):
 
 def _approach(st, now):
     pts = [(t, d) for t, d in st.dist_hist if now - t <= APPROACH_WINDOW]
-    if len(pts) < 3:
+    if len(pts) < 2:
         return 0.0
     dt = pts[-1][0] - pts[0][0]
-    if dt < 0.3:
+    if dt < 0.05:
         return 0.0
     return clamp01(((pts[0][1] - pts[-1][1]) / dt) / cfg.APPROACH_SPEED)
 
@@ -179,19 +182,26 @@ class ThreatEngine:
                 other_strike = tgt["strike"]
 
             armed, strike = me["armed"], me["strike"]
-            reasons = []
+            reasons, parts = [], []   # parts = plain-language signal breakdown for "Why did this trigger?"
             if armed > 0:
                 kind = "ARMED"
                 raw = 0.20 * armed
+                parts.append(("Weapon in hand", 0.20 * armed, 0.20))
                 reasons.append(f"{st.weapon_label} in hand")
+                raised_v = 0.15 * armed if me["raised"] else 0.0
+                raw += raised_v
+                parts.append(("Arm raised", raised_v, 0.15))
                 if me["raised"]:
-                    raw += 0.15 * armed
                     reasons.append("arm raised")
+                strike_v = 0.20 * strike if strike > 0.3 else 0.0
+                raw += strike_v
+                parts.append(("Fast arm movement", strike_v, 0.20))
                 if strike > 0.3:
-                    raw += 0.20 * strike
                     reasons.append("fast arm motion")
                 if tgt is not None:
                     raw += 0.20 * prox + 0.25 * approach
+                    parts.append(("Close to another person", 0.20 * prox, 0.20))
+                    parts.append(("Moving toward them", 0.25 * approach, 0.25))
                     if prox > 0.5:
                         reasons.append(f"right next to person #{tid}")
                     if approach > 0.4:
@@ -200,15 +210,22 @@ class ThreatEngine:
                 kind = "VIOLENCE"
                 raw = 0.0
                 if tgt is not None and prox >= 0.15:
-                    raw = 0.40 * strike + 0.25 * other_strike + 0.20 * prox + 0.15 * approach * min(1.0, 2 * strike)
+                    approach_v = 0.15 * approach * min(1.0, 2 * strike)
+                    raw = 0.40 * strike + 0.25 * other_strike + 0.20 * prox + approach_v
                     raw = min(raw, 0.9)
+                    parts += [("Fast arm movement", 0.40 * strike, 0.40),
+                              ("Other person also aggressive", 0.25 * other_strike, 0.25),
+                              ("Close together", 0.20 * prox, 0.20),
+                              ("Moving toward them", approach_v, 0.15)]
                     if strike > 0.3:
                         reasons.append(f"fast arm motion next to person #{tid}")
                     if other_strike > 0.3:
                         reasons.append(f"person #{tid} also moving aggressively")
             if audio and raw >= 0.2:
                 raw = min(1.0, raw + 0.25 * audio["score"])
+                parts.append(("Alarming sound nearby", 0.25 * audio["score"], 0.25))
                 reasons.append(f"audio: {AUDIO_NAMES.get(audio['label'], audio['label'])} ({audio['score']:.2f})")
+            signals = [{"name": n, "value": round(v, 3), "max": m} for n, v, m in parts]
 
             st.score = (1 - cfg.SMOOTHING) * st.score + cfg.SMOOTHING * raw
             if st.score >= cfg.THREAT_THRESHOLD:
@@ -224,8 +241,11 @@ class ThreatEngine:
             # score falls clearly below it, so a noisy score hovering near 0.6 still counts.
             if st.score >= cfg.THREAT_THRESHOLD and st.above_since is None:
                 st.above_since = now
+                st.peak, st.peak_signals, st.peak_reasons = 0.0, [], []
             elif st.score < cfg.THREAT_THRESHOLD * 0.85:
                 st.above_since = None
+            if st.above_since is not None and st.score >= st.peak:   # remember the strongest moment for the alert
+                st.peak, st.peak_signals, st.peak_reasons = st.score, signals, reasons
             if st.above_since is not None:
                 need = cfg.SUSTAIN_ARMED if kind == "ARMED" else cfg.SUSTAIN_UNARMED
                 if now - st.above_since >= need and now >= st.cooldown_until:
@@ -236,15 +256,17 @@ class ThreatEngine:
                     if kind == "ARMED":
                         msg = f"Armed person #{pid} behaving aggressively" + (f" toward person #{tid}" if near else "")
                         alerts.append({"type": "ARMED_ATTACK_RISK", "service": "POLICE", "severity": "CRITICAL",
-                                       "message": msg, "score": round(st.score, 2), "reasons": reasons, "person_id": pid})
+                                       "message": msg, "score": round(st.peak, 2), "reasons": st.peak_reasons, "person_id": pid,
+                                       "signals": st.peak_signals, "threshold": cfg.THREAT_THRESHOLD, "sustain": need})
                     else:
                         msg = f"Possible physical fight involving person #{pid}" + (f" and #{tid}" if near else "")
                         alerts.append({"type": "VIOLENCE_DETECTED", "service": "POLICE", "severity": "HIGH",
-                                       "message": msg, "score": round(st.score, 2), "reasons": reasons, "person_id": pid})
+                                       "message": msg, "score": round(st.peak, 2), "reasons": st.peak_reasons, "person_id": pid,
+                                       "signals": st.peak_signals, "threshold": cfg.THREAT_THRESHOLD, "sustain": need})
 
             results.append({"id": pid, "box": me["p"]["box"], "kpts": me["p"]["kpts"], "level": st.level,
-                "score": st.score, "armed": armed > 0, "weapon": st.weapon_label if armed > 0 else None,
-                "signals": reasons})
+                            "score": st.score, "armed": armed > 0, "weapon": st.weapon_label if armed > 0 else None,
+                            "signals": signals})
 
         for pid in [k for k, s in self.states.items() if now - s.last_seen > 3.0]:
             del self.states[pid]
@@ -274,8 +296,8 @@ class CollisionEngine:
 
     @staticmethod
     def _speed(pts, now, diag):
-        w = [p for p in pts if now - p[0] <= 0.5]
-        if len(w) < 2 or w[-1][0] - w[0][0] < 0.2:
+        w = [p for p in pts if now - p[0] <= 1.0]
+        if len(w) < 2 or w[-1][0] - w[0][0] < 0.05:
             return 0.0
         dt = w[-1][0] - w[0][0]
         return math.hypot(w[-1][1] - w[0][1], w[-1][2] - w[0][2]) / dt / diag
@@ -309,7 +331,11 @@ class CollisionEngine:
                 alerts.append({"type": "ROAD_ACCIDENT", "service": "AMBULANCE", "severity": "HIGH",
                                "message": f"Collision between {a['label']} #{a['id']} and {b['label']} #{b['id']}",
                                "score": round(min(1.0, 0.5 + pr["pre"]), 2),
-                               "reasons": ["vehicles overlapped while moving, then both stopped"]})
+                               "reasons": ["vehicles overlapped while moving, then both stopped"],
+                               "signals": [{"name": "Moving fast before contact", "value": round(min(1.0, pr["pre"]), 3), "max": 1.0},
+                                           {"name": "Vehicles overlap", "value": 1.0, "max": 1.0},
+                                           {"name": "Both stopped after contact", "value": 1.0, "max": 1.0}],
+                               "threshold": None, "sustain": self.CONFIRM_SEC})
 
         for key in [k for k, p in self.pairs.items() if now - p.get("last", p["since"]) > 1.0]:
             del self.pairs[key]

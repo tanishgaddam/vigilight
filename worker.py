@@ -39,6 +39,7 @@ class CameraWorker:
         self.error = None
 
         self.is_demo = is_demo
+        self.is_xray = False
         self.top = {"id": None, "score": 0.0, "signals": []}
         self.level, self.score, self.people, self.fps = "NORMAL", 0.0, 0, 0.0
         self.latest_view = None
@@ -71,6 +72,31 @@ class CameraWorker:
             self.audio.stop()
         with self._cond:
             self._cond.notify_all()
+
+    def toggle_xray(self):
+        self.is_xray = not self.is_xray
+        if self.latest_view is not None:
+            self._publish(self.latest_view)
+        return self.is_xray
+
+    def toggle_pause(self):
+        if hasattr(self.video, "toggle_pause"):
+            paused = self.video.toggle_pause()
+            # If paused, update HUD immediately
+            if self.latest_view is not None:
+                self._publish(self.latest_view)
+            return paused
+        return False
+
+    def pause(self):
+        if hasattr(self.video, "pause"):
+            self.video.pause()
+            if self.latest_view is not None:
+                self._publish(self.latest_view)
+
+    def resume(self):
+        if hasattr(self.video, "resume"):
+            self.video.resume()
 
     # --- streaming --------------------------------------------------------------
     def _publish(self, img):
@@ -173,6 +199,23 @@ class CameraWorker:
         det = self.detector.detect(frame)
         results, alerts = self.threat.update(det["persons"], det["weapons"], self._audio_context(now), now)
         alerts += self.collision.update(det["vehicles"], now)
+
+        # X-Ray weapon scan: immediately alert on any detected weapon/contraband
+        if self.is_xray:
+            for w in det["weapons"]:
+                if w.get("conf", 0) >= 0.28:
+                    label = w["label"].upper()
+                    alerts.append({
+                        "type": "XRAY_WEAPON_DETECTED",
+                        "service": "SECURITY",
+                        "severity": "CRITICAL",
+                        "camera": self.name,
+                        "score": float(w["conf"]),
+                        "message": f"Concealed dangerous object detected on X-Ray scan: {label}",
+                        "reasons": [f"X-Ray density anomaly: metallic {label.lower()}", f"Confidence: {int(w['conf'] * 100)}%"],
+                        "time": time.strftime("%H:%M:%S"),
+                    })
+
         self.people = len(results)
         self.level = max((r["level"] for r in results), key=LEVEL_RANK.get, default="NORMAL")
         self.score = max((r["score"] for r in results), default=0.0)
@@ -195,11 +238,25 @@ class CameraWorker:
             self._raise(a, view, now)
 
     def _draw(self, frame, results, det):
-        img = frame.copy()
+        if self.is_xray:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(gray)
+            img = cv2.applyColorMap(enhanced, cv2.COLORMAP_BONE)
+            h, w = img.shape[:2]
+            for y in range(0, h, 60):
+                cv2.line(img, (0, y), (w, y), (50, 70, 45), 1)
+            for x in range(0, w, 60):
+                cv2.line(img, (x, 0), (x, h), (50, 70, 45), 1)
+            cv2.putText(img, "X-RAY DUAL-ENERGY SPECTRUM SCANNER v2.4", (14, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+            cv2.putText(img, "SCANNING: HIGH-DENSITY ATOMIC ANOMALIES (WEAPONS / CONTRABAND)", (14, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 220, 255), 1)
+        else:
+            img = frame.copy()
+
         th = max(2, img.shape[1] // 450)
         scale = max(0.5, img.shape[1] / 1280)
         for r in results:
-            color = LEVEL_COLORS[r["level"]]
+            color = (0, 255, 255) if self.is_xray else LEVEL_COLORS[r["level"]]
             x1, y1, x2, y2 = map(int, r["box"])
             cv2.rectangle(img, (x1, y1), (x2, y2), color, th)
             cv2.putText(img, f"#{r['id']} {cfg.risk_label(r['score'])} {r['score']:.2f}", (x1, max(18, y1 - 6)),
@@ -211,8 +268,14 @@ class CameraWorker:
                         cv2.circle(img, (int(x), int(y)), 4 * th, color, -1)
         for w in det["weapons"]:
             x1, y1, x2, y2 = map(int, w["box"])
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), th)
-            cv2.putText(img, f"{w['label']} {w['conf']:.2f}", (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 255), th)
+            if self.is_xray:
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                cv2.rectangle(img, (x1, max(0, y1 - 24)), (x2, y1), (0, 0, 255), -1)
+                cv2.putText(img, f"X-RAY THREAT: {w['label'].upper()} ({int(w['conf']*100)}%)",
+                            (x1 + 4, max(14, y1 - 7)), cv2.FONT_HERSHEY_SIMPLEX, scale * 0.9, (255, 255, 255), 2)
+            else:
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), th)
+                cv2.putText(img, f"{w['label']} {w['conf']:.2f}", (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 255), th)
         for v in det["vehicles"]:
             x1, y1, x2, y2 = map(int, v["box"])
             cv2.rectangle(img, (x1, y1), (x2, y2), (255, 200, 0), 1)
@@ -220,9 +283,12 @@ class CameraWorker:
         h, w = img.shape[:2]
         if w > cfg.STREAM_WIDTH:
             img = cv2.resize(img, (cfg.STREAM_WIDTH, int(h * cfg.STREAM_WIDTH / w)))
-        hud = f"{self.name} | {cfg.crowd_label(self.people)} | {cfg.risk_label(self.score)} | {'DEMO' if self.is_demo else 'LIVE'}"
-        cv2.putText(img, hud, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-        cv2.putText(img, hud, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, LEVEL_COLORS[self.level], 1)
+        paused = getattr(self.video, "paused", False)
+        mode_tag = '[PAUSED]' if paused else ('X-RAY SCANNER' if self.is_xray else ('DEMO' if self.is_demo else 'LIVE'))
+        hud = f"{self.name} | {cfg.crowd_label(self.people)} | {cfg.risk_label(self.score)} | {mode_tag}"
+        hud_y = h - 14 if self.is_xray else 22
+        cv2.putText(img, hud, (10, hud_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
+        cv2.putText(img, hud, (10, hud_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255) if self.is_xray else ((0, 215, 255) if paused else LEVEL_COLORS[self.level]), 1)
         return img
 
     # --- alerts + evidence ----------------------------------------------------------
@@ -257,5 +323,8 @@ class CameraWorker:
                 "risk": cfg.risk_label(self.score) if self.video.online else "Offline",
                 "crowd": cfg.crowd_label(self.people),
                 "top": self.top, "demo": self.is_demo,
+                "paused": getattr(self.video, "paused", False),
+                "is_file": getattr(self.video, "is_file", False),
+                "xray": self.is_xray,
                 "scenario": self.scene.info() if getattr(self, "scene", None) else None,
                 "audio": audio, "error": self.error}

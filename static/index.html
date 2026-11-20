@@ -61,6 +61,8 @@ h2 small{font-family:var(--mono);letter-spacing:0;color:var(--muted);font-size:1
 .cam{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;position:relative;transition:border-color .2s,box-shadow .2s}
 .cam.lv-warning{border-color:rgba(251,191,36,.6)}
 .cam.lv-threat{border-color:var(--danger);box-shadow:0 0 0 1px var(--danger),0 0 26px rgba(244,63,94,.45)}
+.cam.lv-xray{border-color:#22d3ee;box-shadow:0 0 0 1px #22d3ee,0 0 20px rgba(34,211,238,.35)}
+.tool.xray-btn.on{color:#22d3ee;border-color:#22d3ee;background:rgba(34,211,238,.2)}
 .cam-head{display:flex;align-items:center;gap:10px;padding:9px 12px}
 .cam-name{font-weight:700;letter-spacing:.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cam-kind{font-family:var(--mono);font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 6px;text-transform:uppercase}
@@ -150,15 +152,17 @@ select{width:auto;flex:1}
 .reasons{display:flex;gap:6px;flex-wrap:wrap}
 
 /* ---------- alarm overlay ---------- */
-.alarm{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;background:rgba(95,0,15,.9);animation:flash 1s infinite}
+.alarm{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:12px;background:rgba(95,0,15,.9);overflow-y:auto;animation:flash 1s infinite}
 @keyframes flash{50%{background:rgba(160,0,30,.94)}}
-.alarm-box{background:#14060a;border:2px solid var(--danger);border-radius:14px;padding:26px;width:min(660px,100%);text-align:center;display:grid;gap:12px;box-shadow:0 0 60px rgba(244,63,94,.5)}
-.alarm-kicker{font-family:var(--mono);color:#fda4af;letter-spacing:3px;font-size:13px}
-.alarm-type{font-family:var(--head);font-weight:800;font-size:30px;color:#fff;letter-spacing:2px}
-.alarm-msg{font-size:20px}.alarm-why{color:#fda4af;font-size:15px}
-.alarm-box img{width:100%;border-radius:8px;border:1px solid var(--danger)}
-.alarm-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-.alarm-actions .btn{font-size:17px;padding:11px 20px}
+.alarm-box{background:#14060a;border:2px solid var(--danger);border-radius:14px;padding:16px 20px;width:min(560px,100%);max-height:calc(100vh - 24px);overflow-y:auto;text-align:center;display:grid;gap:8px;box-shadow:0 0 60px rgba(244,63,94,.5);margin:auto}
+.alarm-kicker{font-family:var(--mono);color:#fda4af;letter-spacing:3px;font-size:12px}
+.alarm-type{font-family:var(--head);font-weight:800;font-size:22px;color:#fff;letter-spacing:1px}
+.alarm-msg{font-size:16px;line-height:1.3}
+.alarm-why{color:#fda4af;font-size:13px}
+.alarm-box img{width:100%;max-height:min(220px,30vh);object-fit:contain;background:#000;border-radius:8px;border:1px solid var(--danger)}
+.alarm-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:4px}
+.alarm-actions .btn{font-size:15px;padding:8px 16px}
+.paused-badge{position:absolute;top:10px;left:10px;background:rgba(6,9,16,.88);border:1px solid var(--accent);color:var(--accent);font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:4px;letter-spacing:1px;font-weight:700;z-index:5}
 
 /* ---------- toasts ---------- */
 .toasts{position:fixed;right:18px;bottom:56px;z-index:120;display:grid;gap:8px;justify-items:end}
@@ -181,6 +185,7 @@ select{width:auto;flex:1}
   </div>
   <div class="actions">
     <button class="btn" id="soundBtn" aria-pressed="false"><span id="soundIcon"></span><span id="soundLbl">Sound off</span></button>
+    <button class="btn" id="xrayBtn" style="border-color:rgba(34,211,238,.6);color:#22d3ee" title="Dual-Energy X-Ray Threat &amp; Weapon Scanner">⚡ X-Ray Scanner</button>
     <button class="btn danger" id="testBtn">Test alert</button>
     <button class="btn" id="demoBtn">▶ Demo</button>
     <button class="btn" id="guardBtn">📱 Guard view</button>
@@ -191,9 +196,10 @@ select{width:auto;flex:1}
 <!-- demo scenario bar (shown only when demo is active) -->
 <div id="demoBar" hidden style="background:rgba(34,211,238,.08);border-bottom:1px solid rgba(34,211,238,.35);padding:10px 22px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:13px;color:var(--accent)">
   <span style="font-weight:700;letter-spacing:1px">DEMO MODE</span>
-  <span style="color:var(--muted)">Trigger a scenario:</span>
+  <span style="color:var(--muted)">Your videos:</span>
   <span id="scenarioBtns" style="display:flex;gap:6px;flex-wrap:wrap"></span>
-  <button class="btn small" id="demoStop" style="margin-left:auto;color:#fda4af;border-color:rgba(244,63,94,.5)">Stop demo</button>
+  <span id="demoNoVids" style="color:var(--muted);font-size:12px" hidden>No videos yet — add a video file using "Add camera" → Video file</span>
+  <button class="btn small" id="demoStop" style="margin-left:auto;color:#fda4af;border-color:rgba(244,63,94,.5)">■ Stop demo</button>
 </div>
 
 <main class="layout">
@@ -211,7 +217,11 @@ select{width:auto;flex:1}
   <aside class="log" aria-label="Incident log">
     <div class="log-head">
       <div class="section-head" style="margin:0"><h2>Incident log<small id="logCount"></small></h2>
-        <button class="btn small" id="ackAll">Acknowledge all</button></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn small" id="testGlassBtn" style="color:var(--warn);border-color:rgba(251,191,36,.5)" title="Simulate Glass Breaking Sound Threat">🔊 Test Glass</button>
+          <button class="btn small" id="ackAll">Acknowledge all</button>
+        </div>
+      </div>
       <div class="filters" role="group" aria-label="Severity filter">
         <button class="pill" data-sev="all" aria-pressed="true">All</button>
         <button class="pill" data-sev="open" aria-pressed="false">Open</button>
@@ -241,6 +251,12 @@ select{width:auto;flex:1}
         <button class="type" data-type="file" aria-pressed="false"><strong>Video file</strong><span>Recorded clip, loops (demo)</span></button>
       </div>
       <label class="field">Source<input id="addValue" autocomplete="off" spellcheck="false"></label>
+      <div id="videoUploadBox" hidden style="margin-top:-6px;display:grid;gap:6px">
+        <label class="field" style="color:var(--accent)">📁 Or pick video file from your computer:
+          <input type="file" id="addVideoFile" accept="video/mp4,video/x-m4v,video/*" style="width:100%;font-size:13px;background:#0a101b;border:1px dashed var(--line-strong);border-radius:8px;padding:8px;cursor:pointer">
+        </label>
+        <span style="font-size:12px;color:var(--muted)">You can select <em>6296295-hd_1080_1920_25fps.mp4</em> from your Downloads folder!</span>
+      </div>
       <div id="usbBox" hidden><div class="usb-list" id="usbList"></div></div>
       <div class="two">
         <label class="field">Name (optional)<input id="addName" placeholder="main_streetlight" autocomplete="off"></label>
@@ -278,7 +294,61 @@ select{width:auto;flex:1}
     <div class="alarm-msg" id="alMsg"></div>
     <div class="alarm-why" id="alWhy"></div>
     <img id="alImg" alt="Snapshot of the incident" hidden>
-    <div class="alarm-actions"><button class="btn danger" id="alAck">Acknowledge and silence</button><button class="btn" id="alView">View incident</button></div>
+    <div class="alarm-actions">
+      <button class="btn danger" id="alAck">Acknowledge &amp; silence</button>
+      <button class="btn" id="alPauseCam">⏸ Pause camera</button>
+      <button class="btn" id="alView">View incident</button>
+    </div>
+  </div>
+</div>
+
+<!-- guard connection modal -->
+<div class="modal" id="guardModal" hidden role="dialog" aria-modal="true" aria-labelledby="guardTitle">
+  <div class="sheet" style="max-width:440px">
+    <div class="sheet-head"><h2 id="guardTitle">📱 Connect Guard Phone</h2><button class="x" data-close aria-label="Close"><span class="ic" data-i="close"></span></button></div>
+    <div class="sheet-body" style="text-align:center;display:grid;gap:14px">
+      <p style="font-size:14px;color:var(--muted);margin:0">Scan this QR code with any smartphone camera connected to the same Wi-Fi network.</p>
+      
+      <div id="qrBox" style="background:#fff;padding:14px;border-radius:12px;margin:auto;display:inline-block;box-shadow:0 0 20px rgba(0,0,0,.6);min-width:220px;min-height:220px;display:grid;place-items:center">
+        <img id="guardQrImg" src="/guard_qr.png" alt="Scan QR code for Guard View" style="width:200px;height:200px;display:block;image-rendering:pixelated">
+      </div>
+      
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="guardUrlInput" readonly style="font-family:var(--mono);font-size:13px;text-align:center;background:#0a101b" value="">
+        <button class="btn small" id="copyGuardUrl" style="white-space:nowrap">Copy link</button>
+      </div>
+
+      <div style="background:#0a101b;border:1px solid var(--line);border-radius:8px;padding:12px;text-align:left;font-size:13px;color:var(--muted);display:grid;gap:6px">
+        <div>📡 <strong>Live alerts:</strong> Siren &amp; vibration on the guard's phone wherever they are.</div>
+        <div>🚨 <strong>Fast response:</strong> Tap <em>'On my way'</em>, <em>'Verify'</em>, or <em>'Dismiss'</em>.</div>
+        <div>💡 <strong>Why panel:</strong> Full AI signal analysis breakdown on each alert.</div>
+      </div>
+
+      <button class="btn primary" id="openGuardDirect" style="width:100%">Open Guard View in New Tab</button>
+    </div>
+  </div>
+</div>
+
+<!-- x-ray scanner modal -->
+<div class="modal" id="xrayModal" hidden role="dialog" aria-modal="true" aria-labelledby="xrayTitle">
+  <div class="sheet" style="max-width:480px">
+    <div class="sheet-head"><h2 id="xrayTitle">⚡ Dual-Energy X-Ray Threat Scanner</h2><button class="x" data-close aria-label="Close"><span class="ic" data-i="close"></span></button></div>
+    <div class="sheet-body" style="display:grid;gap:14px">
+      <p style="font-size:14px;color:var(--muted);margin:0">Transform any camera feed into an airport/checkpoint security X-Ray scanner. Specifically inspects, outlines, and alerts on <strong>concealed weapons, knives, guns, blades, scissors, and bludgeons</strong>.</p>
+      
+      <div style="background:#0a101b;border:1px solid var(--line-strong);border-radius:10px;padding:14px;display:grid;gap:10px">
+        <label class="field" style="margin:0">Select Camera for X-Ray Inspection:
+          <select id="xrayCamSelect" style="width:100%;font-size:14px;background:var(--surface2)"></select>
+        </label>
+        <button class="btn primary" id="applyXrayBtn" style="width:100%;font-size:15px;padding:10px">⚡ Toggle X-Ray on Selected Camera</button>
+      </div>
+
+      <div style="background:#0a101b;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13px;color:var(--muted);display:grid;gap:6px">
+        <div>🔬 <strong>Dual-Energy Bone Shader:</strong> High-density atomic contrast reveals concealed metallic contours.</div>
+        <div>⚠️ <strong>Active Target Classes:</strong> Knives, handguns, firearms, blades, scissors, and bludgeons.</div>
+        <div>🚨 <strong>Instant Security Dispatch:</strong> Flags contraband and triggers immediate CRITICAL alarm &amp; mobile notification.</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -291,7 +361,9 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 const ICONS = {
   plus: 'M12 5v14M5 12h14', close: 'M6 6l12 12M18 6L6 18', trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   expand: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', full: 'M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3',
-  vol: 'M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14', mute: 'M11 5L6 9H2v6h4l5 4V5zM22 9l-6 6M16 9l6 6'
+  vol: 'M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14', mute: 'M11 5L6 9H2v6h4l5 4V5zM22 9l-6 6M16 9l6 6',
+  play: 'M5 3l14 9-14 9V3z', pause: 'M6 4h4v16H6V4zm8 0h4v16h-4V4z', copy: 'M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2zM4 8v12a2 2 0 0 0 2 2h8',
+  zap: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z'
 };
 function icon(name) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -355,12 +427,32 @@ function triggerAlarm(a) {
   if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
 }
 async function ack(id) {
-  try { await fetch('/api/alerts/' + id + '/ack', { method: 'POST' }); } catch (e) { toast('Could not reach the server', 'err'); return; }
+  try {
+    await fetch('/api/alerts/' + id + '/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Command Center' })
+    });
+  } catch (e) { toast('Could not reach the server', 'err'); return; }
   stopSiren(); $('#alarm').hidden = true; pollAlerts();
 }
 $('#alAck').onclick = () => { if (activeAlert) ack(activeAlert.id); else { stopSiren(); $('#alarm').hidden = true; } };
 $('#alView').onclick = () => { stopSiren(); $('#alarm').hidden = true; if (activeAlert) openIncident(activeAlert.id); };
+$('#alPauseCam').onclick = async () => {
+  stopSiren(); $('#alarm').hidden = true;
+  if (activeAlert && activeAlert.camera) {
+    await togglePause(activeAlert.camera);
+    await ack(activeAlert.id);
+  }
+};
 $('#testBtn').onclick = async () => { await fetch('/api/test_alert', { method: 'POST' }); pollAlerts(); toast('Test alert sent through all configured channels'); };
+$('#testGlassBtn').onclick = async () => {
+  try {
+    await fetch('/api/test_audio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'glass' }) });
+    pollAlerts();
+    toast('🔊 Simulated glass breaking threat alert triggered', 'ok');
+  } catch (e) { toast('Could not trigger test audio', 'err'); }
+};
 $('#ackAll').onclick = async () => {
   const open = st.alerts.filter((a) => !a.acked && a.severity !== 'WARNING');
   if (!open.length) return toast('Nothing to acknowledge');
@@ -368,45 +460,93 @@ $('#ackAll').onclick = async () => {
   stopSiren(); pollAlerts(); toast(open.length + ' alert(s) acknowledged', 'ok');
 };
 
+/* ---------- camera pause/play and x-ray control ---------- */
+async function togglePause(name) {
+  try {
+    const res = await fetch('/api/cameras/' + encodeURIComponent(name) + '/pause', { method: 'POST' });
+    const data = await res.json();
+    toast((data.paused ? '⏸ Paused ' : '▶ Resumed ') + name, 'ok');
+    pollCameras();
+  } catch (e) { toast('Could not reach camera', 'err'); }
+}
+
+async function toggleXray(name) {
+  try {
+    const res = await fetch('/api/cameras/' + encodeURIComponent(name) + '/xray', { method: 'POST' });
+    const data = await res.json();
+    toast((data.xray ? '⚡ X-Ray Threat Scanner ON for ' : 'X-Ray Scanner OFF for ') + name, 'ok');
+    pollCameras();
+  } catch (e) { toast('Could not reach camera', 'err'); }
+}
+
 /* ---------- cameras ---------- */
 function buildCam(c, i) {
   const card = el('article', 'cam');
   const head = el('div', 'cam-head');
   const name = el('div', 'cam-name', c.name); name.title = c.name;
-  const kind = el('span', 'cam-kind', c.kind === 'usb' ? 'USB' : 'NET');
+  const kind = el('span', 'cam-kind', c.kind === 'demo' ? 'DEMO' : (c.kind === 'usb' ? 'USB' : 'NET'));
   const chip = el('span', 'chip c-off', 'LOADING');
   head.append(name, kind, el('span', 'sp'), chip);
   const view = el('div', 'view');
   const img = el('img'); img.src = '/video_feed/' + encodeURIComponent(c.name); img.alt = 'Live feed from ' + c.name;
   const veil = el('div', 'veil'); veil.append(el('div', 'spinner'), el('span', '', 'Starting...'));
+  const pausedBadge = el('div', 'paused-badge', '⏸ PAUSED'); pausedBadge.hidden = !c.paused;
   const tools = el('div', 'tools');
   const mk = (cls, ic, label, fn) => { const b = el('button', 'tool ' + cls); b.setAttribute('aria-label', label); b.title = label; b.appendChild(icon(ic)); b.onclick = fn; return b; };
+  const pauseBtn = mk('pause-btn', c.paused ? 'play' : 'pause', c.paused ? 'Resume feed' : 'Pause feed', async (e) => {
+    e.stopPropagation();
+    await togglePause(c.name);
+  });
+  const xrayBtn = mk('xray-btn' + (c.xray ? ' on' : ''), 'zap', c.xray ? 'Disable X-Ray' : 'Enable X-Ray Scanner', async (e) => {
+    e.stopPropagation();
+    await toggleXray(c.name);
+  });
   tools.append(
+    pauseBtn,
+    xrayBtn,
     mk('', 'expand', 'Focus view', () => openFocus(c.name)),
     mk('', 'full', 'Fullscreen', () => { if (img.requestFullscreen) img.requestFullscreen(); }),
     mk('rm', 'trash', 'Remove camera', async () => {
       if (!confirm('Remove camera ' + c.name + '?')) return;
       await fetch('/api/cameras/' + encodeURIComponent(c.name), { method: 'DELETE' }); toast('Removed ' + c.name); pollCameras();
     }));
-  view.append(img, veil, tools);
+  view.append(img, veil, pausedBadge, tools);
   const foot = el('div', 'cam-foot');
   const meter = el('div', 'meter'); const fill = el('i'); meter.appendChild(fill);
   const m1 = el('b'), m2 = el('b'); meter.append(m1, m2);
   const facts = el('div', 'facts');
   foot.append(meter, facts);
   card.append(head, view, foot);
-  st.refs[c.name] = { card, chip, veil, veilText: veil.lastChild, fill, m1, m2, facts };
+  st.refs[c.name] = { card, chip, veil, veilText: veil.lastChild, fill, m1, m2, facts, pauseBtn, pausedBadge, xrayBtn };
   return card;
 }
 function fact(label, value, bad) { const f = el('span', 'fact' + (bad ? ' bad' : '')); f.append(document.createTextNode(label + ' '), el('strong', '', value)); return f; }
 function updateCam(c) {
   const r = st.refs[c.name]; if (!r) return;
-  r.chip.className = 'chip ' + lvClass(c); r.chip.textContent = lvText(c);
-  r.card.classList.toggle('lv-threat', c.online && c.level === 'THREAT');
-  r.card.classList.toggle('lv-warning', c.online && c.level === 'WARNING');
+  r.chip.className = 'chip ' + (c.paused ? 'c-watch' : lvClass(c));
+  r.chip.textContent = c.paused ? 'PAUSED' : lvText(c);
+  r.card.classList.toggle('lv-threat', c.online && !c.paused && c.level === 'THREAT');
+  r.card.classList.toggle('lv-warning', c.online && !c.paused && c.level === 'WARNING');
+  r.card.classList.toggle('lv-xray', !!c.xray);
+  if (c.xray) {
+    r.chip.className = 'chip';
+    r.chip.style.color = '#22d3ee';
+    r.chip.textContent = '⚡ X-RAY';
+  } else {
+    r.chip.style.color = '';
+  }
+  if (r.xrayBtn) {
+    r.xrayBtn.classList.toggle('on', !!c.xray);
+    r.xrayBtn.title = c.xray ? 'Disable X-Ray Scanner' : 'Enable X-Ray Scanner';
+  }
   r.veil.hidden = c.online && !c.loading;
   r.veilText.textContent = c.error ? c.error : (c.loading ? 'Loading AI models...' : 'Camera offline - retrying');
   r.veil.firstChild.hidden = !!c.error;
+  if (r.pausedBadge) r.pausedBadge.hidden = !c.paused;
+  if (r.pauseBtn) {
+    put(r.pauseBtn, c.paused ? 'play' : 'pause');
+    r.pauseBtn.title = c.paused ? 'Resume feed' : 'Pause feed';
+  }
   const th = st.sys ? st.sys.thresholds : { warning: 0.35, threat: 0.6 };
   r.m1.style.left = (th.warning * 100) + '%'; r.m2.style.left = (th.threat * 100) + '%';
   r.fill.style.width = Math.round(c.score * 100) + '%';
@@ -464,8 +604,10 @@ function updateFocus() {
   const c = st.cams.find((x) => x.name === focusName); const side = $('#focusSide'); if (!c) return;
   side.textContent = '';
   const kv = (k, v) => { const d = el('div', 'kv'); d.append(el('span', '', k), el('b', '', v)); return d; };
-  const chip = el('span', 'chip ' + lvClass(c), lvText(c));
-  side.append(chip, kv('Source', c.source + (c.kind === 'usb' ? ' (USB)' : '')), kv('Threat score', Math.round(c.score * 100) + '%'),
+  const chip = el('span', 'chip ' + (c.paused ? 'c-watch' : lvClass(c)), c.paused ? 'PAUSED' : lvText(c));
+  const pBtn = el('button', 'btn' + (c.paused ? ' primary' : ''), c.paused ? '▶ Resume feed' : '⏸ Pause feed');
+  pBtn.onclick = async () => { await togglePause(c.name); updateFocus(); };
+  side.append(chip, pBtn, kv('Source', c.source + (c.kind === 'usb' ? ' (USB)' : '')), kv('Threat score', Math.round(c.score * 100) + '%'),
     kv('People in view', String(c.people)), kv('Camera / AI rate', c.cam_fps.toFixed(0) + ' / ' + c.fps.toFixed(1) + ' fps'),
     kv('Audio', c.audio.enabled ? (c.audio.backend === 'yamnet' ? 'YAMNet: ' : 'Basic: ') + c.audio.last : 'Off'));
   if (c.error) side.appendChild(kv('Error', c.error));
@@ -492,7 +634,17 @@ function buildAlert(a) {
   }
   const side = el('div', ''); side.style.cssText = 'display:grid;gap:6px;justify-items:start';
   const tags = el('div', 'a-row'); tags.append(el('span', 'tag sev-' + a.severity, a.severity));
-  if (a.clip) tags.appendChild(el('span', 'tag', 'clip saved')); if (a.acked) tags.appendChild(el('span', 'tag', 'acknowledged'));
+  if (a.clip) tags.appendChild(el('span', 'tag', 'clip saved'));
+  if (a.responder) {
+    const rInfo = '👤 ' + a.responder + (a.handled_at ? ' · ' + a.handled_at : '') + (a.responded_in != null ? ' (' + Math.round(a.responded_in) + 's)' : '');
+    tags.appendChild(el('span', 'tag primary', rInfo));
+  } else if (a.acked) {
+    tags.appendChild(el('span', 'tag', 'acknowledged'));
+  }
+  if (a.status && !['new', 'pending'].includes(a.status)) {
+    const statusLabels = { confirmed: 'Confirmed real', responding: 'Responding', resolved: 'Resolved', dismissed: 'False alarm', closed: 'Closed' };
+    tags.appendChild(el('span', 'tag st-' + a.status, statusLabels[a.status] || a.status));
+  }
   side.appendChild(tags);
   const btns = el('div', 'a-row'); const d = el('button', 'btn small', 'Details'); d.onclick = () => openIncident(a.id); btns.appendChild(d);
   if (!a.acked && a.severity !== 'WARNING') { const b = el('button', 'btn small', 'Acknowledge'); b.onclick = () => ack(a.id); btns.appendChild(b); }
@@ -501,7 +653,7 @@ function buildAlert(a) {
 }
 function renderAlerts() {
   const list = visibleAlerts();
-  const sig = st.sev + '|' + st.cam + '|' + list.map((a) => a.id + ':' + a.acked + ':' + (a.clip ? 1 : 0)).join(',');
+  const sig = st.sev + '|' + st.cam + '|' + list.map((a) => a.id + ':' + a.acked + ':' + (a.clip ? 1 : 0) + ':' + (a.responder || '') + ':' + (a.status || '')).join(',');
   if (sig === st.alertSig) return; st.alertSig = sig;
   const feed = $('#feed'); feed.textContent = '';
   if (!list.length) feed.appendChild(el('div', 'empty', st.alerts.length ? 'No incidents match this filter.' : '> All clear. Awaiting threats...'));
@@ -524,14 +676,26 @@ let incId = null;
 function openIncident(id, refreshOnly) {
   const a = st.alerts.find((x) => x.id === id); if (!a) return;
   incId = id; const body = $('#incBody');
-  if (refreshOnly && body.dataset.clip === String(!!a.clip) && body.dataset.acked === String(a.acked)) return;
-  body.dataset.clip = String(!!a.clip); body.dataset.acked = String(a.acked); body.textContent = '';
+  if (refreshOnly && body.dataset.clip === String(!!a.clip) && body.dataset.acked === String(a.acked) && body.dataset.responder === String(a.responder || '') && body.dataset.status === String(a.status || '')) return;
+  body.dataset.clip = String(!!a.clip); body.dataset.acked = String(a.acked); body.dataset.responder = String(a.responder || ''); body.dataset.status = String(a.status || '');
+  body.textContent = '';
   $('#incTitle').textContent = pretty(a.type);
   if (a.clip) {
     const v = el('video'); v.controls = true; v.preload = 'metadata'; v.src = '/evidence/' + encodeURIComponent(a.clip); if (a.snapshot) v.poster = '/evidence/' + encodeURIComponent(a.snapshot); body.appendChild(v);
     const dl = el('a', 'btn small', 'Download clip'); dl.href = v.src; dl.download = a.clip; dl.style.justifySelf = 'start'; body.appendChild(dl);
   } else if (a.snapshot) { const im = el('img'); im.src = '/evidence/' + encodeURIComponent(a.snapshot); im.alt = 'Incident snapshot'; body.appendChild(im); }
   body.appendChild(el('div', 'a-msg', a.message));
+  if (a.responder || a.handled_at || (a.status && a.status !== 'new')) {
+    const rBox = el('div', 'a-row');
+    rBox.style.cssText = 'background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:6px;font-size:13px;display:flex;align-items:center;gap:8px';
+    const stMap = { confirmed: 'Confirmed real', responding: 'Guard on the way', resolved: 'Resolved', dismissed: 'False alarm', closed: 'Acknowledged', pending: 'Pending guard check' };
+    const rWho = a.responder ? '👤 ' + a.responder : 'Status: ' + (stMap[a.status] || a.status);
+    const rWhen = a.handled_at ? ' · ' + a.handled_at : '';
+    const rDur = a.responded_in != null ? ' (reaction time: ' + Math.round(a.responded_in) + 's)' : '';
+    const rSt = a.status && a.responder ? ' [' + (stMap[a.status] || a.status) + ']' : '';
+    rBox.append(el('strong', '', 'Response: '), el('span', '', rWho + rWhen + rDur + rSt));
+    body.appendChild(rBox);
+  }
   const tags = el('div', 'reasons'); tags.append(el('span', 'tag sev-' + a.severity, a.severity), el('span', 'tag', a.camera), el('span', 'tag', 'dispatch: ' + a.service), el('span', 'tag', a.time), el('span', 'tag', Math.round(a.score * 100) + '% confidence'));
   body.appendChild(tags);
   if (a.reasons && a.reasons.length) { const r = el('div', 'reasons'); a.reasons.forEach((x) => r.appendChild(el('span', 'tag', x))); body.appendChild(r); }
@@ -555,28 +719,57 @@ const TYPES = {
   usb: { ph: '0', hint: 'USB camera number. Use Scan USB to find free ones.', audio: 'mic' },
   ip: { ph: '192.168.1.20:8080', hint: 'Just the address shown in your camera app. /video and /audio.wav are added for you.', audio: 'auto' },
   rtsp: { ph: 'rtsp://user:password@192.168.1.30/stream', hint: 'Full RTSP URL from your camera manual.', audio: 'off' },
-  file: { ph: 'C:/clips/staged_attack.mp4', hint: 'Path to a video file on the computer running VigiLight. It loops, which is handy for demos.', audio: 'off' }
+  file: { ph: 'C:/Users/ASUS/Downloads/6296295-hd_1080_1920_25fps.mp4', hint: 'Select a video file above or type the full path to an MP4 video clip.', audio: 'off' }
 };
 let addType = 'ip';
 function setType(t) {
   addType = t; $$('#types .type').forEach((b) => b.setAttribute('aria-pressed', b.dataset.type === t));
-  $('#addValue').placeholder = TYPES[t].ph; $('#addAudio').value = TYPES[t].audio; $('#usbBox').hidden = t !== 'usb';
+  $('#addValue').placeholder = TYPES[t].ph; $('#addAudio').value = TYPES[t].audio;
+  $('#usbBox').hidden = t !== 'usb';
+  const vBox = $('#videoUploadBox'); if (vBox) vBox.hidden = t !== 'file';
   setHint(TYPES[t].hint);
 }
 function setHint(msg, err) { const h = $('#addHint'); h.textContent = msg; h.className = 'hint' + (err ? ' err' : ''); }
 $$('#types .type').forEach((b) => b.onclick = () => setType(b.dataset.type));
-function openAdd() { setType(addType); $('#addValue').value = ''; $('#addName').value = ''; openModal($('#addModal')); }
+const vidInput = $('#addVideoFile');
+if (vidInput) {
+  vidInput.onchange = () => {
+    if (vidInput.files && vidInput.files[0]) {
+      const f = vidInput.files[0];
+      $('#addValue').value = f.name;
+      if (!$('#addName').value) $('#addName').value = f.name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_');
+      setHint('Ready to upload "' + f.name + '" on click Add Camera');
+    }
+  };
+}
+function openAdd() {
+  setType(addType); $('#addValue').value = ''; $('#addName').value = '';
+  if (vidInput) vidInput.value = '';
+  openModal($('#addModal'));
+}
 $('#addOpen').onclick = openAdd;
 $('#addBtn').onclick = async () => {
-  const btn = $('#addBtn'); const value = $('#addValue').value.trim();
-  if (!value) return setHint('Enter the camera source first.', true);
+  const btn = $('#addBtn');
+  const file = vidInput && vidInput.files && vidInput.files[0];
+  const value = $('#addValue').value.trim();
+  if (!file && !value) return setHint('Choose a video file or enter a camera source.', true);
   btn.disabled = true;
   try {
-    const res = await fetch('/api/cameras', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: addType, value, name: $('#addName').value, audio: $('#addAudio').value }) });
-    const data = await res.json();
+    let res, data;
+    if (addType === 'file' && file) {
+      setHint('Uploading video clip to server...');
+      const form = new FormData();
+      form.append('video', file);
+      if ($('#addName').value) form.append('name', $('#addName').value);
+      res = await fetch('/api/upload_video', { method: 'POST', body: form });
+      data = await res.json();
+    } else {
+      res = await fetch('/api/cameras', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: addType, value, name: $('#addName').value, audio: $('#addAudio').value }) });
+      data = await res.json();
+    }
     if (!res.ok) return setHint(data.error || 'Could not add the camera.', true);
-    closeModal($('#addModal')); toast('Added ' + data.name + '. The first start loads the AI models, so give it a few seconds.', 'ok'); pollCameras();
+    closeModal($('#addModal')); toast('Added ' + data.name + '. Loading AI models...', 'ok'); pollCameras();
   } catch (e) { setHint('Could not reach the server.', true); } finally { btn.disabled = false; }
 };
 $('#addValue').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#addBtn').click(); });
@@ -589,6 +782,116 @@ $('#scanBtn').onclick = async () => {
   } catch (e) { setHint('Scan failed. Is the server running?', true); }
 };
 
+/* ---------- guard view modal ---------- */
+async function openGuardModal() {
+  try {
+    const s = await (await fetch('/api/system')).json(); st.sys = s;
+  } catch (e) {}
+  const url = st.sys && st.sys.guard_url ? st.sys.guard_url : (location.origin + '/guard');
+  $('#guardUrlInput').value = url;
+  $('#guardQrImg').src = '/guard_qr.png?t=' + Date.now();
+  openModal($('#guardModal'));
+}
+$('#guardBtn').onclick = openGuardModal;
+$('#copyGuardUrl').onclick = () => {
+  const inp = $('#guardUrlInput');
+  inp.select();
+  if (navigator.clipboard) navigator.clipboard.writeText(inp.value);
+  else document.execCommand('copy');
+  toast('Copied Guard URL to clipboard', 'ok');
+};
+$('#openGuardDirect').onclick = () => {
+  window.open($('#guardUrlInput').value || '/guard', '_blank');
+};
+
+/* ---------- x-ray scanner modal ---------- */
+function openXrayModal() {
+  const sel = $('#xrayCamSelect');
+  sel.textContent = '';
+  if (!st.cams.length) {
+    const opt = el('option', '', 'No cameras connected — Add a camera first');
+    opt.value = '';
+    sel.appendChild(opt);
+  } else {
+    st.cams.forEach((c) => {
+      const opt = el('option', '', c.name + (c.xray ? ' [CURRENTLY X-RAY ACTIVE]' : ''));
+      opt.value = c.name;
+      if (c.xray) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+  openModal($('#xrayModal'));
+}
+$('#xrayBtn').onclick = openXrayModal;
+$('#applyXrayBtn').onclick = async () => {
+  const cam = $('#xrayCamSelect').value;
+  if (!cam) return toast('No camera selected', 'err');
+  closeModal($('#xrayModal'));
+  await toggleXray(cam);
+};
+
+/* ---------- demo mode ---------- */
+async function startDemo() {
+  try {
+    const res = await fetch('/api/demo/start', { method: 'POST' });
+    const list = await res.json();
+    $('#demoBar').hidden = false;
+    $('#demoBtn').classList.add('on');
+    if (list.length === 0) {
+      toast('Demo mode on — add a video file first (Add camera → Video file)', 'ok');
+    } else {
+      toast('Demo mode started (' + list.length + ' video' + (list.length > 1 ? 's' : '') + ')', 'ok');
+    }
+    loadDemoScenarios();
+    pollCameras();
+  } catch (e) { toast('Could not start demo', 'err'); }
+}
+async function stopDemo() {
+  try {
+    await fetch('/api/demo/stop', { method: 'POST' });
+    $('#demoBar').hidden = true;
+    $('#demoBtn').classList.remove('on');
+    toast('Demo mode stopped', 'ok');
+    pollCameras();
+  } catch (e) { toast('Could not stop demo', 'err'); }
+}
+$('#demoBtn').onclick = startDemo;
+$('#demoStop').onclick = stopDemo;
+
+async function loadDemoScenarios() {
+  try {
+    const scenarios = await (await fetch('/api/demo/scenarios')).json();
+    const box = $('#scenarioBtns');
+    const noVids = $('#demoNoVids');
+    box.textContent = '';
+    if (!scenarios.length) {
+      if (noVids) noVids.hidden = false;
+      return;
+    }
+    if (noVids) noVids.hidden = true;
+    scenarios.forEach((sc) => {
+      const b = el('button', 'btn small', '▶ ' + sc.label);
+      b.title = 'Play / restart ' + sc.label;
+      b.onclick = async () => {
+        try {
+          // Resume the camera if paused, then restart from beginning
+          const cam = sc.camera || sc.id;
+          // First unpause if paused
+          const camState = st.cams.find((c) => c.name === cam);
+          if (camState && camState.paused) {
+            await fetch('/api/cameras/' + encodeURIComponent(cam) + '/pause', { method: 'POST' });
+          }
+          // Trigger (restart video)
+          const r = await fetch('/api/demo/trigger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ camera: cam, id: sc.id }) });
+          if (!r.ok) { const err = await r.json(); toast(err.error || 'Error', 'err'); return; }
+          toast('▶ Playing: ' + sc.label, 'ok');
+        } catch (e) { toast('Could not play — is demo mode on?', 'err'); }
+      };
+      box.appendChild(b);
+    });
+  } catch (e) {}
+}
+
 /* ---------- footer ---------- */
 async function loadSystem() {
   try {
@@ -596,6 +899,11 @@ async function loadSystem() {
     const box = $('#channels'); box.textContent = '';
     Object.keys(s.channels).forEach((k) => box.appendChild(el('span', 'ch' + (s.channels[k] ? ' on' : ''), k)));
     $('#thresholds').textContent = 'WARNING AT ' + Math.round(s.thresholds.warning * 100) + '%  /  ALERT AT ' + Math.round(s.thresholds.threat * 100) + '%';
+    if (s.demo) {
+      $('#demoBar').hidden = false;
+      $('#demoBtn').classList.add('on');
+      loadDemoScenarios();
+    }
   } catch (e) { /* retried below */ }
 }
 

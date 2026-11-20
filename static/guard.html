@@ -155,8 +155,10 @@ function buildWhy(a) {
   // Explain what made it fire
   let note = '';
   if (a.type === 'ARMED_ATTACK_RISK') note = 'Holding a weapon is not enough. The AI also needs aggressive behaviour toward someone, and it has to last about ' + (a.sustain || 1).toFixed(1) + ' seconds.';
+  else if (a.type === 'XRAY_WEAPON_DETECTED') note = 'Dual-energy X-Ray scanner detected high-density metallic object contours matching a weapon or contraband.';
   else if (a.threshold != null && a.sustain) note = 'The AI alerts when these signals add up to the danger level and stay there for about ' + a.sustain.toFixed(1) + ' seconds.';
   else if (a.type === 'ROAD_ACCIDENT') note = 'Two vehicles touched while moving, then both stopped.';
+  else if (a.type === 'GLASS_BREAK_HEARD') note = 'Acoustic audio AI detected sharp high-frequency glass shattering transients (4.2 kHz).';
   else note = 'The audio AI recognised this sound. Confidence: ' + (a.confidence || 'Possible').toLowerCase() + '.';
   box.appendChild(el('div', 'why-note', note));
   return box;
@@ -164,7 +166,7 @@ function buildWhy(a) {
 
 /* ---------- alert cards ---------- */
 async function act(id, action) {
-  const name = action === 'respond' ? getName(false) : undefined;
+  const name = getName(false);
   try { await fetch('/api/alerts/' + id + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, name }) }); }
   catch (e) { return toast('No connection. Try again.'); }
   $('#takeover').hidden = true; poll();

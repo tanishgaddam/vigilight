@@ -1,14 +1,14 @@
-"""Audio AI. Google's YAMNet (521 AudioSet sound classes) listens to each camera's
-microphone and reports glass breaking, screaming/shouting and gunshots.
+"""Audio AI. Google's YAMNet (521 AudioSet classes) or built-in Physics-Based
+Spectral Acoustic Classifier listens to each camera's microphone and reports:
+  - GLASS_BREAK (high-frequency shattering & brittle fracture transients)
+  - SCREAM (distress vocal resonance & elevated harmonic energy)
+  - GUNSHOT (explosive high-crest acoustic impulse)
 
 Audio sources per camera:
   "auto"   IP Webcam style cameras: http://host:port/audio.wav next to the /video URL
   "mic"    default local microphone (good partner for a USB camera)
   "mic:2"  local microphone with a specific device index
   <url>    any http WAV stream
-
-If TensorFlow is not installed the monitor falls back to a plain loudness check and
-reports it as low-severity LOUD_NOISE only.
 """
 import logging
 import queue
@@ -48,13 +48,13 @@ class YamnetClassifier:
                 try:
                     cls._instance = cls()
                     log.info("YAMNet loaded")
-                except Exception as exc:  # TensorFlow missing, offline, ...
-                    log.warning("YAMNet unavailable (%s) - using loudness fallback", exc)
+                except Exception as exc:  # TensorFlow missing, pkg_resources missing, offline...
+                    log.warning("YAMNet unavailable (%s) - using spectral classifier fallback", exc)
+                    cls._instance = None
             return cls._instance
 
     def __init__(self):
         import csv
-
         import tensorflow_hub as hub
 
         self._model = hub.load("https://tfhub.dev/google/yamnet/1")
@@ -70,6 +70,73 @@ class YamnetClassifier:
             scores, _, _ = self._model(wave.astype(np.float32))
         peak = scores.numpy().max(axis=0)  # max over frames: glass breaks are short
         return {cat: float(peak[idx].max()) if idx else 0.0 for cat, idx in self._cat_idx.items()}
+
+
+class SpectralAcousticClassifier:
+    """Offline spectral analysis acoustic classifier for Glass Break, Scream, and Bang/Gunshot.
+    Uses FFT frequency distribution, zero-crossing rate, and transient crest factor.
+    Runs 100% locally with zero extra dependencies.
+    """
+
+    def classify(self, wave, sr=TARGET_SR):
+        if len(wave) == 0:
+            return {"GLASS_BREAK": 0.0, "SCREAM": 0.0, "GUNSHOT": 0.0, "LOUD_NOISE": 0.0}
+
+        rms = float(np.sqrt(np.mean(wave ** 2)))
+        peak = float(np.max(np.abs(wave)))
+        crest = peak / (rms + 1e-6)
+
+        # Baseline noise gate
+        if rms < 0.012:
+            return {"GLASS_BREAK": 0.0, "SCREAM": 0.0, "GUNSHOT": 0.0, "LOUD_NOISE": 0.0}
+
+        n = len(wave)
+        fft_vals = np.abs(np.fft.rfft(wave))
+        freqs = np.fft.rfftfreq(n, 1.0 / sr)
+        total_energy = float(np.sum(fft_vals ** 2) + 1e-8)
+
+        # Acoustic Spectral Bands:
+        # Low: 50 - 800 Hz (thuds, rumbles, base speech)
+        # Mid: 800 - 3000 Hz (vocal resonance, distress cries)
+        # High: 2800 - 8000 Hz (glass fracture, shatter, metallic clinks)
+        low_band = (freqs >= 50) & (freqs < 800)
+        mid_band = (freqs >= 800) & (freqs < 3000)
+        high_band = (freqs >= 2800) & (freqs <= 8000)
+
+        e_low = float(np.sum(fft_vals[low_band] ** 2) / total_energy)
+        e_mid = float(np.sum(fft_vals[mid_band] ** 2) / total_energy)
+        e_high = float(np.sum(fft_vals[high_band] ** 2) / total_energy)
+
+        # Zero-Crossing Rate (ZCR) — high for noisy/shattering frequencies
+        zcr = float(np.mean(np.abs(np.diff(np.sign(wave)))) / 2.0)
+
+        # 1. Glass Break detection:
+        # High energy in the 2.8k-8kHz band, elevated ZCR, and sudden transient burst
+        glass_score = 0.0
+        if e_high > 0.18 or (e_high > 0.12 and zcr > 0.11):
+            vol_boost = min(1.0, rms / 0.035)
+            glass_score = min(1.0, (e_high * 1.7 + zcr * 1.5) * vol_boost)
+
+        # 2. Scream detection:
+        # Human scream: dominant mid-frequency vocal resonance (800-3000Hz)
+        scream_score = 0.0
+        if e_mid > 0.35 and rms > 0.025:
+            scream_score = min(1.0, (e_mid * 1.5) * min(1.0, rms / 0.07))
+
+        # 3. Gunshot / Loud Bang:
+        # High crest factor (explosive transient spike)
+        gun_score = 0.0
+        if peak > 0.35 and crest > 4.0 and rms > 0.035:
+            gun_score = min(1.0, (crest / 7.0) * min(1.0, peak / 0.6))
+
+        loud_score = min(1.0, rms / 0.25)
+
+        return {
+            "GLASS_BREAK": float(np.clip(glass_score, 0.0, 1.0)),
+            "SCREAM": float(np.clip(scream_score, 0.0, 1.0)),
+            "GUNSHOT": float(np.clip(gun_score, 0.0, 1.0)),
+            "LOUD_NOISE": float(np.clip(loud_score, 0.0, 1.0)),
+        }
 
 
 def _resample(x, sr):
@@ -98,7 +165,12 @@ class AudioMonitor:
 
     def _run(self):
         clf = YamnetClassifier.get()
-        self.backend = "yamnet" if clf else "loudness"
+        if clf is None:
+            clf = SpectralAcousticClassifier()
+            self.backend = "spectral"
+        else:
+            self.backend = "yamnet"
+
         while self.running:
             try:
                 if self.source.startswith("mic"):
@@ -113,11 +185,7 @@ class AudioMonitor:
                 time.sleep(3)
 
     def _handle(self, window, clf):
-        if clf is not None:
-            scores = clf.classify(window)
-        else:
-            rms = float(np.sqrt(np.mean(window ** 2)))
-            scores = {"LOUD_NOISE": min(1.0, rms / 0.3)}
+        scores = clf.classify(window)
         self.error = None
         self.on_scores(scores)
 

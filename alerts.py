@@ -67,15 +67,19 @@ class AlertDispatcher:
         self._pool = ThreadPoolExecutor(max_workers=4)
         self._mqtt = None
         if cfg.MQTT_ENABLED:
-            try:
-                import paho.mqtt.client as mqtt
+            def _connect_mqtt():
+                try:
+                    import paho.mqtt.client as mqtt
 
-                self._mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-                self._mqtt.connect_async(cfg.MQTT_BROKER, 1883, 60)
-                self._mqtt.loop_start()
-            except Exception as exc:
-                log.warning("MQTT disabled: %s", exc)
-                self._mqtt = None
+                    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                    client.connect(cfg.MQTT_BROKER, 1883, 60)
+                    client.loop_start()
+                    self._mqtt = client
+                except Exception as exc:
+                    log.warning("MQTT disabled: %s", exc)
+                    self._mqtt = None
+
+            threading.Thread(target=_connect_mqtt, daemon=True).start()
 
     # --- public API ---------------------------------------------------------
     def channels(self):
@@ -89,31 +93,108 @@ class AlertDispatcher:
 
     def publish(self, alert):
         alert = dict(alert)
+        demo = bool(alert.get("demo"))
+        high = alert["severity"] in ("HIGH", "CRITICAL")
+        notifiable = high and (not demo or cfg.DEMO_NOTIFY)
+        hold = notifiable and cfg.SETTINGS["verify_first"]
         with self._lock:
             self._seq += 1
             alert.update(id=self._seq, time=time.strftime("%H:%M:%S"), ts=time.time(), acked=False,
-                         clip=alert.get("clip"))
+                         clip=alert.get("clip"), status="pending" if hold else "new", responder=None,
+                         responded_in=None, escalated=False, notifiable=notifiable,
+                         confidence=cfg.confidence_label(alert["score"]))
             self.history.appendleft(alert)
-        if alert["severity"] in ("HIGH", "CRITICAL"):
-            self._pool.submit(self._notify, alert)
+        if hold:
+            timer = threading.Timer(cfg.VERIFY_TIMEOUT, self._timeout, args=(alert["id"],))
+            timer.daemon = True
+            timer.start()
+        elif notifiable:
+            self._escalate(alert)
         return alert
+
+    def _find(self, alert_id):
+        return next((a for a in self.history if a["id"] == alert_id), None)
+
+    def _escalate(self, alert):
+        """Send the alert (and its clip, if already recorded) to the external channels, once."""
+        with self._lock:
+            if alert["escalated"] or not alert["notifiable"]:
+                return
+            alert["escalated"] = True
+            has_clip = bool(alert.get("clip"))
+        self._pool.submit(self._notify, alert)
+        if has_clip:
+            self._pool.submit(self._send_clip, alert)
+
+    def _timeout(self, alert_id):
+        with self._lock:
+            alert = self._find(alert_id)
+            if alert is None or alert["status"] != "pending":
+                return
+            alert["status"] = "new"
+            alert["auto_escalated"] = True
+        self._escalate(alert)
 
     def attach_clip(self, alert_id, filename):
         with self._lock:
-            alert = next((a for a in self.history if a["id"] == alert_id), None)
+            alert = self._find(alert_id)
             if alert is None or not filename:
                 return
             alert["clip"] = filename
-        if alert["severity"] in ("HIGH", "CRITICAL"):
+            send = alert["escalated"]
+        if send:
             self._pool.submit(self._send_clip, alert)
 
-    def ack(self, alert_id):
+    def act(self, alert_id, action, name=None):
+        """Guard actions: confirm (real), dismiss (false alarm), respond (on my way), resolve (done), ack."""
         with self._lock:
-            for a in self.history:
-                if a["id"] == alert_id:
-                    a["acked"] = True
-                    return True
-        return False
+            alert = self._find(alert_id)
+            if alert is None:
+                return None
+            if action == "confirm":
+                alert["status"] = "confirmed"
+                if name:
+                    alert["responder"] = name[:30]
+            elif action == "dismiss":
+                alert["status"], alert["acked"] = "dismissed", True
+                if name:
+                    alert["responder"] = name[:30]
+            elif action == "respond":
+                alert["status"], alert["acked"] = "responding", True
+                alert["responder"] = (name or "Guard")[:30]
+                if alert.get("responded_in") is None:
+                    alert["responded_in"] = round(time.time() - alert["ts"], 1)
+            elif action == "resolve":
+                alert["status"], alert["acked"] = "resolved", True
+                if name:
+                    alert["responder"] = name[:30]
+            elif action == "ack":
+                alert["status"], alert["acked"] = "closed", True
+                if name:
+                    alert["responder"] = name[:30]
+                elif not alert.get("responder"):
+                    alert["responder"] = "Command Center"
+            else:
+                return None
+            alert["handled_at"] = time.strftime("%H:%M:%S")
+        if action in ("confirm", "respond"):
+            self._escalate(alert)   # a guard says it is real: release it to the other channels
+        return dict(alert)
+
+    def ack(self, alert_id, name=None):
+        return self.act(alert_id, "ack", name=name) is not None
+
+    def stats(self):
+        with self._lock:
+            items = [a for a in self.history if a["severity"] != "WARNING" and a["type"] != "TEST_ALERT"]
+        real = [a for a in items if a["status"] in ("confirmed", "responding", "resolved")]
+        false = [a for a in items if a["status"] == "dismissed"]
+        times = [a["responded_in"] for a in items if a["responded_in"] is not None]
+        reviewed = len(real) + len(false)
+        return {"total": len(items), "confirmed": len(real), "false_alarms": len(false),
+                "waiting": len([a for a in items if a["status"] in ("new", "pending")]),
+                "precision": round(len(real) / reviewed, 2) if reviewed else None,
+                "avg_response_sec": round(sum(times) / len(times), 1) if times else None}
 
     def list(self):
         with self._lock:

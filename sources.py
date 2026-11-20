@@ -18,9 +18,27 @@ class VideoSource:
         self._fps_t = time.time()
         self._fps_n = 0
         self.running = False
+        self.paused = False
         self._lock = threading.Lock()
         self._cap = None
         self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+        return self.paused
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
+
+    def restart(self):
+        """Seek video back to the beginning (file sources only)."""
+        with self._lock:
+            if self._cap is not None and self.is_file:
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self.paused = False
 
     def start(self):
         self.running = True
@@ -62,6 +80,9 @@ class VideoSource:
     def _loop(self):
         delay = 0.0
         while self.running:
+            if self.paused:
+                time.sleep(0.08)
+                continue
             if self._cap is None:
                 self._cap = self._open()
                 if self._cap is None:
