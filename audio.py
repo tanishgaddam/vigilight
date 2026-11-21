@@ -26,9 +26,10 @@ log = logging.getLogger("vigilight.audio")
 TARGET_SR = 16000
 WINDOW_SEC = 2.0
 HOP_SEC = 1.0
+GLASS_MIN_FRAMES = 8     # >= 160 ms of high-frequency-dominated audio before it can count as breaking glass
 
 CATEGORIES = {
-    "GLASS_BREAK": ["Glass", "Shatter", "Breaking", "Smash, crash"],
+    "GLASS_BREAK": ["Glass", "Shatter"],   # generic "Breaking"/"Smash, crash" also fire on toy-car and plastic impacts
     "GUNSHOT": ["Gunshot, gunfire", "Machine gun", "Fusillade", "Artillery fire", "Cap gun"],
     "SCREAM": ["Screaming", "Shout", "Yell", "Bellow"],
 }
@@ -111,11 +112,22 @@ class SpectralAcousticClassifier:
         zcr = float(np.mean(np.abs(np.diff(np.sign(wave)))) / 2.0)
 
         # 1. Glass Break detection:
-        # High energy in the 2.8k-8kHz band, elevated ZCR, and sudden transient burst
+        # Shattering glass is a burst followed by a high-frequency "tinkle" that lasts a few hundred ms.
+        # A plastic clack or toy-car bump is one very short click, so we count how many 20 ms frames
+        # are dominated by 2.8-8 kHz energy and require a sustained run of them.
         glass_score = 0.0
-        if e_high > 0.18 or (e_high > 0.12 and zcr > 0.11):
-            vol_boost = min(1.0, rms / 0.035)
-            glass_score = min(1.0, (e_high * 1.7 + zcr * 1.5) * vol_boost)
+        flen = int(sr * 0.02)
+        if n >= flen * 10:
+            frames = wave[: (n // flen) * flen].reshape(-1, flen)
+            spec = np.abs(np.fft.rfft(frames * np.hanning(flen), axis=1)) ** 2
+            ff = np.fft.rfftfreq(flen, 1.0 / sr)
+            fe = spec.sum(axis=1) + 1e-9
+            f_high = spec[:, (ff >= 2800) & (ff <= 8000)].sum(axis=1) / fe
+            f_rms = np.sqrt((frames ** 2).mean(axis=1))
+            hf_frames = int(np.sum((f_high > 0.35) & (f_rms > 0.02)))
+            if hf_frames >= GLASS_MIN_FRAMES and e_high > 0.18:
+                vol_boost = min(1.0, rms / 0.035)
+                glass_score = min(1.0, (min(1.0, hf_frames / 20.0) * 0.6 + e_high * 1.2 + zcr * 0.8) * vol_boost)
 
         # 2. Scream detection:
         # Human scream: dominant mid-frequency vocal resonance (800-3000Hz)

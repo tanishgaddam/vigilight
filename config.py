@@ -61,6 +61,14 @@ OBJECT_CONF = _float("OBJECT_CONF", 0.30)
 WEAPON_CONF = _float("WEAPON_CONF", 0.45)
 STREAM_WIDTH = _int("STREAM_WIDTH", 640)
 
+# --- vehicles / collisions (tuned so small toy cars work) -------------------
+VEHICLE_CONF = _float("VEHICLE_CONF", 0.15)              # low on purpose: COCO has no toy-car class, toys score low
+VEHICLE_IMGSZ = _int("VEHICLE_IMGSZ", 800)               # bigger input helps small vehicles
+VEHICLE_EXTRA = [c.strip().lower() for c in _str("VEHICLE_EXTRA", "").split(",") if c.strip()]  # e.g. "train,boat" if toys get those labels
+COLLISION_ANY_OVERLAP = _bool("COLLISION_ANY_OVERLAP", True)   # alert when two vehicle boxes overlap, even if both are static
+COLLISION_OVERLAP = _float("COLLISION_OVERLAP", 0.05)    # overlap ratio (of the smaller box) that counts as touching
+COLLISION_CONFIRM_SEC = _float("COLLISION_CONFIRM_SEC", 0.5)   # boxes must keep overlapping this long
+
 # --- behaviour scoring ----------------------------------------------------
 WARNING_THRESHOLD = _float("WARNING_THRESHOLD", 0.35)    # dashboard shows WARNING
 THREAT_THRESHOLD = _float("THREAT_THRESHOLD", 0.60)      # alert is raised (after sustain time)
@@ -77,6 +85,7 @@ ALERT_COOLDOWN = _float("ALERT_COOLDOWN", 15)            # seconds between alert
 # --- audio ----------------------------------------------------------------
 AUDIO_ENABLED = _bool("AUDIO_ENABLED", True)
 AUDIO_THRESHOLD = _float("AUDIO_THRESHOLD", 0.5)
+GLASS_THRESHOLD = _float("GLASS_THRESHOLD", 0.65)        # glass-break needs a stronger match than other sounds
 AUDIO_CONTEXT_SEC = _float("AUDIO_CONTEXT_SEC", 4.0)     # how long a sound boosts nearby visual threat scores
 SCREAM_HITS = _int("SCREAM_HITS", 2)                     # consecutive audio windows needed for a scream alert
 
@@ -88,9 +97,12 @@ CLIP_POST_SEC = _float("CLIP_POST_SEC", 3)
 EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- alert channels -------------------------------------------------------
-TELEGRAM_BOT_TOKEN = _str("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = _str("TELEGRAM_CHAT_ID")
-DISCORD_WEBHOOK_URL = _str("DISCORD_WEBHOOK_URL")
+# Telegram / Discord are switched off unless you set TELEGRAM_ENABLED=true / DISCORD_ENABLED=true in .env
+TELEGRAM_ENABLED = _bool("TELEGRAM_ENABLED", False)
+DISCORD_ENABLED = _bool("DISCORD_ENABLED", False)
+TELEGRAM_BOT_TOKEN = _str("TELEGRAM_BOT_TOKEN") if TELEGRAM_ENABLED else ""
+TELEGRAM_CHAT_ID = _str("TELEGRAM_CHAT_ID") if TELEGRAM_ENABLED else ""
+DISCORD_WEBHOOK_URL = _str("DISCORD_WEBHOOK_URL") if DISCORD_ENABLED else ""
 NTFY_TOPIC = _str("NTFY_TOPIC")
 NTFY_SERVER = _str("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
 MQTT_ENABLED = _bool("MQTT_ENABLED", True)
@@ -161,7 +173,7 @@ def derive_audio_source(source, audio):
 # --- verification workflow, demo, access ----------------------------------
 VERIFY_FIRST = _bool("VERIFY_FIRST", False)              # hold external alerts until a guard confirms
 VERIFY_TIMEOUT = _float("VERIFY_TIMEOUT", 45)            # ...or send them anyway after this many seconds
-DEMO_NOTIFY = _bool("DEMO_NOTIFY", False)                # demo alerts stay on the dashboard unless this is true
+DEMO_NOTIFY = _bool("DEMO_NOTIFY", True)                 # demo alerts are pushed to ntfy/MQTT too (false = dashboard only)
 ACCESS_PIN = _str("ACCESS_PIN")                          # optional shared PIN for the dashboard and guard view
 CROWD_BUSY = _int("CROWD_BUSY", 4)                       # people in view that count as busy / crowded / packed
 CROWD_CROWDED = _int("CROWD_CROWDED", 8)

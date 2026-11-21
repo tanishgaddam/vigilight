@@ -64,7 +64,7 @@ class AlertDispatcher:
         self.history = deque(maxlen=100)
         self._lock = threading.Lock()
         self._seq = 0
-        self._pool = ThreadPoolExecutor(max_workers=4)
+        self._pool = ThreadPoolExecutor(max_workers=8)
         self._mqtt = None
         if cfg.MQTT_ENABLED:
             def _connect_mqtt():
@@ -83,13 +83,14 @@ class AlertDispatcher:
 
     # --- public API ---------------------------------------------------------
     def channels(self):
-        return {
-            "dashboard": True,
-            "telegram": bool(cfg.TELEGRAM_BOT_TOKEN and cfg.TELEGRAM_CHAT_ID),
-            "discord": bool(cfg.DISCORD_WEBHOOK_URL),
-            "ntfy": bool(cfg.NTFY_TOPIC),
-            "mqtt": self._mqtt is not None,
-        }
+        ch = {"dashboard": True}
+        if cfg.TELEGRAM_ENABLED:
+            ch["telegram"] = bool(cfg.TELEGRAM_BOT_TOKEN and cfg.TELEGRAM_CHAT_ID)
+        if cfg.DISCORD_ENABLED:
+            ch["discord"] = bool(cfg.DISCORD_WEBHOOK_URL)
+        ch["ntfy"] = bool(cfg.NTFY_TOPIC)
+        ch["mqtt"] = self._mqtt is not None
+        return ch
 
     def publish(self, alert):
         alert = dict(alert)
@@ -122,7 +123,8 @@ class AlertDispatcher:
                 return
             alert["escalated"] = True
             has_clip = bool(alert.get("clip"))
-        self._pool.submit(self._notify, alert)
+        log.info("Escalating alert #%s (%s, %s) to external channels", alert["id"], alert["type"], alert["severity"])
+        self._notify(alert)
         if has_clip:
             self._pool.submit(self._send_clip, alert)
 
@@ -202,11 +204,17 @@ class AlertDispatcher:
 
     # --- channels -----------------------------------------------------------
     def _notify(self, alert):
-        for send in (self._send_mqtt, self._send_telegram, self._send_discord, self._send_ntfy):
-            try:
-                send(alert)
-            except Exception as exc:
-                log.warning("%s failed: %s", send.__name__, exc)
+        """Every channel runs on its own worker thread, so a slow or unreachable channel
+        can never delay the ntfy push."""
+        for send in (self._send_ntfy, self._send_mqtt, self._send_telegram, self._send_discord):
+            self._pool.submit(self._safe_send, send, alert)
+
+    @staticmethod
+    def _safe_send(send, alert):
+        try:
+            send(alert)
+        except Exception as exc:
+            log.warning("%s failed: %s", send.__name__, exc)
 
     def _send_mqtt(self, a):
         if self._mqtt is None:
@@ -252,9 +260,13 @@ class AlertDispatcher:
         path = cfg.EVIDENCE_DIR / a["snapshot"] if a.get("snapshot") else None
         if path and path.exists():
             with open(path, "rb") as f:
-                requests.put(url, data=f, headers={**headers, "Filename": path.name}, timeout=20)
+                resp = requests.put(url, data=f, headers={**headers, "Filename": path.name}, timeout=20)
         else:
-            requests.post(url, data=ascii_text.encode(), headers=headers, timeout=10)
+            resp = requests.post(url, data=ascii_text.encode(), headers=headers, timeout=10)
+        if resp.ok:
+            log.info("ntfy push sent for alert #%s", a["id"])
+        else:
+            log.warning("ntfy rejected alert #%s: HTTP %s %s", a["id"], resp.status_code, resp.text[:120])
 
     def _send_clip(self, a):
         path = cfg.EVIDENCE_DIR / a["clip"]

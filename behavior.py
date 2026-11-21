@@ -280,6 +280,14 @@ def _overlap(a, b):
     return (ix * iy) / area if area > 0 else 0.0
 
 
+def _iou(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
 class CollisionEngine:
     """Road accident = two tracked vehicles overlap while at least one was moving
     beforehand, and then both stay (almost) stopped. Parked or jammed traffic that
@@ -287,8 +295,9 @@ class CollisionEngine:
 
     MOVING = 0.35        # diagonals/sec before contact
     LOW = 0.12           # diagonals/sec after contact
-    CONTACT = 0.12       # overlap ratio that counts as contact
-    CONFIRM_SEC = 0.7
+    CONTACT = 0.12       # overlap ratio that counts as contact (strict mode)
+    CONFIRM_SEC = 0.7    # (strict mode)
+    DUPLICATE_IOU = 0.80  # two boxes this similar are the same object detected twice, not two vehicles
 
     def __init__(self):
         self.tracks = {}
@@ -316,8 +325,11 @@ class CollisionEngine:
             tr["speed"] = self._speed(tr["pts"], now, max(1.0, math.hypot(x2 - x1, y2 - y1)))
             tr["speeds"].append((now, tr["speed"]))
 
+        any_overlap = cfg.COLLISION_ANY_OVERLAP
+        contact = cfg.COLLISION_OVERLAP if any_overlap else self.CONTACT
+        confirm = cfg.COLLISION_CONFIRM_SEC if any_overlap else self.CONFIRM_SEC
         for a, b in combinations(vehicles, 2):
-            if _overlap(a["box"], b["box"]) < self.CONTACT:
+            if _overlap(a["box"], b["box"]) < contact or _iou(a["box"], b["box"]) > self.DUPLICATE_IOU:
                 continue
             key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
             ta, tb = self.tracks[a["id"]], self.tracks[b["id"]]
@@ -325,19 +337,23 @@ class CollisionEngine:
             if pr is None:
                 pr = self.pairs[key] = {"since": now, "pre": max(self._peak(ta, now), self._peak(tb, now)), "cool": 0.0}
             pr["last"] = now
-            if (now - pr["since"] >= self.CONFIRM_SEC and pr["pre"] >= self.MOVING
-                    and max(ta["speed"], tb["speed"]) < self.LOW and now >= pr["cool"]):
+            if any_overlap:      # boxes overlap for long enough -> alert, moving or not
+                fire = now - pr["since"] >= confirm and now >= pr["cool"]
+            else:                # strict: was moving, then both stopped
+                fire = (now - pr["since"] >= confirm and pr["pre"] >= self.MOVING
+                        and max(ta["speed"], tb["speed"]) < self.LOW and now >= pr["cool"])
+            if fire:
                 pr["cool"] = now + cfg.ALERT_COOLDOWN
                 alerts.append({"type": "ROAD_ACCIDENT", "service": "AMBULANCE", "severity": "HIGH",
                                "message": f"Collision between {a['label']} #{a['id']} and {b['label']} #{b['id']}",
-                               "score": round(min(1.0, 0.5 + pr["pre"]), 2),
-                               "reasons": ["vehicles overlapped while moving, then both stopped"],
+                               "score": round(min(1.0, 0.65 + pr["pre"]), 2),
+                               "reasons": ["vehicle boxes overlap" + (" after moving" if pr["pre"] >= self.MOVING else " (vehicles static)")],
                                "signals": [{"name": "Moving fast before contact", "value": round(min(1.0, pr["pre"]), 3), "max": 1.0},
                                            {"name": "Vehicles overlap", "value": 1.0, "max": 1.0},
                                            {"name": "Both stopped after contact", "value": 1.0, "max": 1.0}],
-                               "threshold": None, "sustain": self.CONFIRM_SEC})
+                               "threshold": None, "sustain": confirm})
 
-        for key in [k for k, p in self.pairs.items() if now - p.get("last", p["since"]) > 1.0]:
+        for key in [k for k, p in self.pairs.items() if now - p.get("last", p["since"]) > 1.5]:
             del self.pairs[key]
         for vid in [k for k, t in self.tracks.items() if now - t["seen"] > 3.0]:
             del self.tracks[vid]

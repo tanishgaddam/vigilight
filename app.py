@@ -20,7 +20,7 @@ from flask import Flask, Response, jsonify, redirect, request, send_from_directo
 import alerts as alerts_mod
 import config as cfg
 from alerts import AlertDispatcher
-from demo import create_demo_workers, find_videos
+from demo import create_demo_worker, list_demo_videos
 from sources import scan_usb
 from worker import CameraWorker
 
@@ -31,6 +31,7 @@ app = Flask(__name__, static_folder="static", static_url_path="/static")
 dispatcher = AlertDispatcher()
 workers = {}
 lock = threading.RLock()
+demo_mode = False   # True after "Start Demo"; nothing plays until a video is picked in the dropdown
 
 
 def persist():
@@ -275,7 +276,7 @@ def settings():
 @app.route("/api/system")
 def system():
     with lock:
-        demo = any(w.is_demo for w in workers.values())
+        demo = demo_mode or any(w.is_demo for w in workers.values())
     return jsonify({"channels": dispatcher.channels(), "thresholds": {"warning": cfg.WARNING_THRESHOLD, "threat": cfg.THREAT_THRESHOLD},
                     "settings": dict(cfg.SETTINGS, verify_timeout=cfg.VERIFY_TIMEOUT), "guard_url": guard_url(),
                     "qr": qr_available(), "demo": demo, "pin": bool(cfg.ACCESS_PIN), "demo_notify": cfg.DEMO_NOTIFY})
@@ -283,37 +284,37 @@ def system():
 
 @app.route("/api/demo/scenarios")
 def demo_scenarios():
-    """Return the list of video files available as demo cameras."""
-    with lock:
-        demo_workers = [w for w in workers.values() if w.is_demo]
-    result = []
-    for w in demo_workers:
-        name = w.name
-        label = name.replace("demo_", "").replace("_", " ").title()
-        result.append({"id": name, "label": label, "camera": name})
-    # If no demo workers yet, show available videos from disk
-    if not result:
-        for path in find_videos():
-            import os as _os
-            base = _os.path.splitext(_os.path.basename(path))[0].replace("_", " ").title()
-            cam_name = "demo_" + _os.path.splitext(_os.path.basename(path))[0].replace(" ", "_")
-            result.append({"id": cam_name, "label": base, "camera": cam_name})
-    return jsonify(result)
+    """Videos available as demo cameras (same list the dropdown uses)."""
+    return jsonify([{"id": v["id"], "label": v["label"], "camera": v["id"]} for v in list_demo_videos()])
 
 
 @app.route("/api/demo/videos")
 def demo_videos():
-    """Return list of video files the user has in the videos/ folder."""
-    import os as _os
-    vids = find_videos()
-    return jsonify([{"path": p, "name": _os.path.splitext(_os.path.basename(p))[0]} for p in vids])
+    """Video files found in videos/ (and Downloads) for the dropdown; 'playing' marks the active one."""
+    with lock:
+        playing = {n for n, w in workers.items() if w.is_demo}
+    return jsonify([dict(v, playing=v["id"] in playing) for v in list_demo_videos()])
 
 
 @app.route("/api/demo/start", methods=["POST"])
 def demo_start():
+    """Turn demo mode on. With {"video": "<id>"} only that video plays (other demo videos are stopped).
+    Without a video nothing is started - pick one from the dropdown."""
+    global demo_mode
+    data = request.get_json(silent=True) or {}
+    wanted = data.get("video") or data.get("id") or data.get("camera")
     with lock:
-        if not any(w.is_demo for w in workers.values()):
-            for w in create_demo_workers(dispatcher):
+        demo_mode = True
+        if wanted:
+            video = next((v for v in list_demo_videos() if v["id"] == wanted), None)
+            if video is None:
+                return jsonify({"error": "Video not found. Put it in the videos/ folder."}), 404
+            for name in [n for n, w in workers.items() if w.is_demo and n != wanted]:
+                workers.pop(name).stop()
+            if wanted in workers:
+                workers[wanted].video.restart()        # already loaded: replay from the start
+            else:
+                w = create_demo_worker(dispatcher, video)
                 workers[w.name] = w
                 w.start()
         return jsonify([w.status() for w in workers.values() if w.is_demo])
@@ -321,7 +322,9 @@ def demo_start():
 
 @app.route("/api/demo/stop", methods=["POST"])
 def demo_stop():
+    global demo_mode
     with lock:
+        demo_mode = False
         for name in [n for n, w in workers.items() if w.is_demo]:
             workers.pop(name).stop()
     return jsonify({"demo": False})

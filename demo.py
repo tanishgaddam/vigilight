@@ -38,6 +38,32 @@ def find_demo_video():
     return vids[0] if vids else None
 
 
+def demo_id(path):
+    """Stable camera name for a video file, e.g. 'fight scene.mp4' -> 'demo_fight_scene'."""
+    base = os.path.splitext(os.path.basename(path))[0]
+    clean = "".join(c if c.isalnum() or c in "_-" else "_" for c in base)[:30]
+    return "demo_" + clean.strip("_")
+
+
+def list_demo_videos():
+    """[{id, name, label, path}] for the dropdown. Same-named files get a numeric suffix."""
+    out, seen = [], set()
+    for path in find_videos():
+        base = demo_id(path)
+        vid, n = base, 2
+        while vid in seen:
+            vid, n = f"{base}_{n}", n + 1
+        seen.add(vid)
+        name = os.path.splitext(os.path.basename(path))[0]
+        out.append({"id": vid, "name": name, "label": name.replace("_", " ").replace("-", " ").strip().title(), "path": path})
+    return out
+
+
+def create_demo_worker(dispatcher, video):
+    """One demo CameraWorker for one entry of list_demo_videos()."""
+    return CameraWorker(video["id"], video["path"], "off", dispatcher, is_demo=True)
+
+
 def create_demo_workers(dispatcher):
     """Create one CameraWorker per video file found (no synthetic scenes)."""
     workers = []

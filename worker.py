@@ -136,7 +136,7 @@ class CameraWorker:
 
         if scores.get("GUNSHOT", 0) >= thr:
             push("GUNSHOT_AUDIO", "CRITICAL", "Gunshot-like sound detected", scores["GUNSHOT"])
-        elif scores.get("GLASS_BREAK", 0) >= thr:
+        elif scores.get("GLASS_BREAK", 0) >= cfg.GLASS_THRESHOLD:
             push("GLASS_BREAK", "HIGH", "Glass breaking detected", scores["GLASS_BREAK"])
         self._scream_hits = self._scream_hits + 1 if scores.get("SCREAM", 0) >= thr else 0
         if self._scream_hits >= cfg.SCREAM_HITS:
